@@ -10,7 +10,6 @@ BanG Dream! 游戏助手，基于 tsugu-api-python
 from __future__ import annotations
 
 import re
-from base64 import b64decode
 from typing import List, Optional
 
 import tsugu_api_async
@@ -92,7 +91,7 @@ def response_to_chain(response: list) -> list:
     for item in response:
         if item.get("type") == "string":
             chain.append(Plain(item["string"]))
-        else:
+        elif item.get("type") == "base64":
             b64_data = item.get("string", "")
             if b64_data:
                 chain.append(Image.fromBase64(b64_data))
@@ -153,7 +152,7 @@ def _parse_server_args(args_str: str) -> tuple[Optional[int], list[str]]:
     "astrbot_plugin_tsugu",
     "QClaw",
     "BanG Dream! 游戏助手 (TsuguBangDreamBot)",
-    "1.1.0",
+    "1.2.0",
     "https://github.com/Sov8forUs/astrbot_plugin_tsugu",
 )
 class TsuguPlugin(Star):
@@ -190,9 +189,13 @@ class TsuguPlugin(Star):
         return f"{event.get_platform_id()}:{event.get_sender_id()}"
 
     def _platform_name(self, event: AstrMessageEvent) -> str:
+        """获取平台名称，用于 tsugu API
+        
+        注意: QQ 平台统一使用 'red'，onebot/chronocat 会被后端处理为 red
+        """
         pid = event.get_platform_id()
         if "qq" in pid or "aiocqhttp" in pid:
-            return "qq"
+            return "red"
         elif "weixin" in pid or "wechat" in pid:
             return "weixin"
         elif "telegram" in pid:
@@ -201,6 +204,17 @@ class TsuguPlugin(Star):
             return "discord"
         else:
             return pid
+
+    def _cmd_args(self, event: AstrMessageEvent) -> str:
+        """获取命令参数（去掉命令名后的文本）
+        
+        event.message_str 在 waking_check 阶段已去掉 wake_prefix，
+        但仍包含命令名本身。需要手动去掉第一个 token。
+        """
+        msg = event.message_str.strip()
+        # 去掉第一个 token（命令名）
+        parts = msg.split(None, 1)
+        return parts[1] if len(parts) > 1 else ""
 
     # ── 绑定验证拦截器 ────────────────────────────────────────────
     # 拦截正在绑定流程中的用户发来的玩家ID，完成验证
@@ -277,7 +291,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查曲")
     async def cmd_search_song(self, event: AstrMessageEvent):
-        args = event.message_str.strip()
+        args = self._cmd_args(event)
         if not args:
             yield event.plain_result("用法: 查曲 <关键词或曲目ID>\n示例: 查曲 1 / 查曲 ag lv27")
             return
@@ -304,7 +318,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查卡")
     async def cmd_search_card(self, event: AstrMessageEvent):
-        args = event.message_str.strip()
+        args = self._cmd_args(event)
         if not args:
             yield event.plain_result("用法: 查卡 <关键词或卡牌ID>\n示例: 查卡 1399 / 查卡 绿 tsugu")
             return
@@ -331,7 +345,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查卡面")
     async def cmd_card_illustration(self, event: AstrMessageEvent):
-        args = event.message_str.strip()
+        args = self._cmd_args(event)
         if not args or not args.isdigit():
             yield event.plain_result("用法: 查卡面 <卡牌ID>\n示例: 查卡面 1399")
             return
@@ -352,7 +366,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查角色")
     async def cmd_search_character(self, event: AstrMessageEvent):
-        args = event.message_str.strip()
+        args = self._cmd_args(event)
         if not args:
             yield event.plain_result("用法: 查角色 <关键词或角色ID>\n示例: 查角色 10 / 查角色 吉他")
             return
@@ -379,7 +393,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查活动")
     async def cmd_search_event(self, event: AstrMessageEvent):
-        args = event.message_str.strip()
+        args = self._cmd_args(event)
         if not args:
             yield event.plain_result("用法: 查活动 <关键词或活动ID>\n示例: 查活动 177 / 查活动 绿 tsugu")
             return
@@ -406,7 +420,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查卡池")
     async def cmd_search_gacha(self, event: AstrMessageEvent):
-        args = event.message_str.strip()
+        args = self._cmd_args(event)
         if not args or not args.isdigit():
             yield event.plain_result("用法: 查卡池 <卡池ID>\n示例: 查卡池 922")
             return
@@ -433,7 +447,7 @@ class TsuguPlugin(Star):
 
     @filter.command("抽卡模拟")
     async def cmd_gacha_simulate(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         parts = raw.split() if raw else []
         times = int(parts[0]) if parts and parts[0].isdigit() else 10
         gacha_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
@@ -460,7 +474,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查谱面")
     async def cmd_song_chart(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         parts = raw.split() if raw else []
         if not parts or not parts[0].isdigit():
             yield event.plain_result("用法: 查谱面 <曲目ID> [难度]\n示例: 查谱面 1 / 查谱面 1 expert")
@@ -500,7 +514,7 @@ class TsuguPlugin(Star):
 
     @filter.command("分数表")
     async def cmd_song_meta(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         server = None
         if raw:
             try:
@@ -535,7 +549,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查试炼")
     async def cmd_event_stage(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         event_id = None
         meta = False
         parts = raw.split() if raw else []
@@ -568,7 +582,7 @@ class TsuguPlugin(Star):
 
     @filter.command("ycx")
     async def cmd_ycx(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         parts = raw.split() if raw else []
         if not parts or not parts[0].isdigit():
             yield event.plain_result(
@@ -616,7 +630,7 @@ class TsuguPlugin(Star):
 
     @filter.command("ycxall")
     async def cmd_ycxall(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         parts = raw.split() if raw else []
         event_id = None
         server = None
@@ -654,7 +668,7 @@ class TsuguPlugin(Star):
 
     @filter.command("lsycx")
     async def cmd_lsycx(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         parts = raw.split() if raw else []
         if not parts or not parts[0].isdigit():
             yield event.plain_result(
@@ -717,7 +731,7 @@ class TsuguPlugin(Star):
 
     @filter.command("查玩家")
     async def cmd_search_player(self, event: AstrMessageEvent):
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         parts = raw.split() if raw else []
         if not parts or not parts[0].isdigit():
             yield event.plain_result("用法: 查玩家 <玩家ID> [服务器名]\n示例: 查玩家 10000000 / 查玩家 40474621 jp")
@@ -755,7 +769,7 @@ class TsuguPlugin(Star):
     @filter.command("玩家绑定")
     async def cmd_player_bind(self, event: AstrMessageEvent):
         """玩家绑定 [服务器名] — 开始绑定流程"""
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         server = None
         if raw:
             try:
@@ -806,7 +820,7 @@ class TsuguPlugin(Star):
     @filter.command("解除绑定")
     async def cmd_player_unbind(self, event: AstrMessageEvent):
         """解除绑定 [服务器名] — 开始解绑流程"""
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         server = None
         if raw:
             try:
@@ -866,7 +880,7 @@ class TsuguPlugin(Star):
     @filter.command("玩家状态")
     async def cmd_player_info(self, event: AstrMessageEvent):
         """玩家状态 [服务器名] — 查询自己的玩家状态"""
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         server = None
         if raw:
             try:
@@ -943,7 +957,7 @@ class TsuguPlugin(Star):
     @filter.command("主服务器")
     async def cmd_switch_main_server(self, event: AstrMessageEvent):
         """主服务器 <服务器名> — 设置主服务器"""
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         if not raw:
             yield event.plain_result("用法: 主服务器 <服务器名>\n可选: 日服/国际服/台服/国服/韩服 (或 jp/en/tw/cn/kr)")
             return
@@ -968,7 +982,7 @@ class TsuguPlugin(Star):
     @filter.command("显示服务器")
     async def cmd_displayed_servers(self, event: AstrMessageEvent):
         """显示服务器 <服务器1> <服务器2> ... — 设置默认显示的服务器列表（空参查看当前）"""
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
 
         if not raw:
             # 查看当前设置
@@ -1020,7 +1034,7 @@ class TsuguPlugin(Star):
     @filter.command("选择绑定")
     async def cmd_switch_player(self, event: AstrMessageEvent):
         """选择绑定 <编号> — 切换默认使用的绑定玩家"""
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
         if not raw or not raw.isdigit():
             yield event.plain_result("用法: 选择绑定 <编号>\n使用 绑定列表 查看编号")
             return
@@ -1060,7 +1074,7 @@ class TsuguPlugin(Star):
     @filter.command("随机曲目")
     async def cmd_random_song(self, event: AstrMessageEvent):
         """随机曲目 [关键词...] — 随机一首曲目，可加关键词筛选"""
-        raw = event.message_str.strip()
+        raw = self._cmd_args(event)
 
         try:
             tsugu_user = await _get_tsugu_user(self._platform_name(event), event.get_sender_id())

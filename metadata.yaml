@@ -1,6 +1,6 @@
 name: astrbot_plugin_tsugu
 desc: BanG Dream! 游戏助手插件 (TsuguBangDreamBot)，支持查曲/查卡/查角色/查活动/查卡池/抽卡模拟/谱面查询/分数表/活动试炼/档线查询/车牌列表/玩家绑定等
-version: 1.1.0
+version: 1.2.0
 author: QClaw
 repo: https://github.com/Sov8forUs/astrbot_plugin_tsugu
 commands:
