@@ -28,5 +28,49 @@
     "description": "压缩返回数据",
     "hint": "压缩返回数据以减少数据传输量",
     "default": true
+  },
+  "whitelist_enabled": {
+    "type": "bool",
+    "description": "白名单模式",
+    "hint": "启用后仅白名单群可使用插件，私聊不受限制",
+    "default": false
+  },
+  "whitelist_groups": {
+    "type": "list",
+    "description": "白名单群号",
+    "hint": "添加群号到列表中，仅列表中的群可使用插件",
+    "default": []
+  },
+  "command_aliases": {
+    "type": "text",
+    "description": "命令别名",
+    "hint": "JSON格式，如: {\"搜歌\":\"查曲\",\"查卡牌\":\"查卡\"}。键为别名，值为原命令名",
+    "default": "{\"ycm\":\"车牌列表\"}",
+    "editor_mode": true,
+    "editor_language": "json"
+  },
+  "wake_prefix": {
+    "type": "string",
+    "description": "唤醒前缀",
+    "hint": "自定义唤醒前缀，如 / 或 !。留空则只使用AstrBot全局唤醒前缀。配置后发送 前缀+命令名 即可触发",
+    "default": ""
+  },
+  "at_wake_enabled": {
+    "type": "bool",
+    "description": "@唤醒开关",
+    "hint": "启用时需@bot或使用唤醒前缀才回复（推荐启用）；关闭时任何消息均可触发命令",
+    "default": true
+  },
+  "at_sender_enabled": {
+    "type": "bool",
+    "description": "回复@发送人",
+    "hint": "启用时回复消息会@发送人",
+    "default": false
+  },
+  "quote_reply_enabled": {
+    "type": "bool",
+    "description": "回复引用原消息",
+    "hint": "启用时回复消息会引用发送人的原始消息",
+    "default": false
   }
 }
