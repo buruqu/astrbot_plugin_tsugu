@@ -1,0 +1,2 @@
+# astrbot_plugin_tsugu
+试试tsugu的功能放到astrbot
