@@ -32,6 +32,10 @@ commands:
     desc: 查询指定档位的历史档线数据
   - name: 车牌列表
     desc: 获取所有车牌
+  - name: 开启车牌转发
+    desc: 开启后发送的车牌自动提交到公共频道
+  - name: 关闭车牌转发
+    desc: 关闭车牌转发功能
   - name: 查玩家
     desc: 查询指定ID玩家的信息
   - name: 玩家绑定
