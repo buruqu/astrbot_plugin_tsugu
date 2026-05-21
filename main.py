@@ -223,6 +223,7 @@ class TsuguPlugin(Star):
             "玩家状态": "cmd_player_info", "绑定列表": "cmd_player_list",
             "主服务器": "cmd_switch_main_server", "显示服务器": "cmd_displayed_servers",
             "选择绑定": "cmd_switch_player", "随机曲目": "cmd_random_song",
+            "开启车牌转发": "cmd_share_room_on", "关闭车牌转发": "cmd_share_room_off",
         }
 
         # 反向映射: handler 方法名 → 命令名
@@ -237,10 +238,11 @@ class TsuguPlugin(Star):
             cmd_new_aliases.setdefault(original_cmd, set()).add(alias_name)
 
         # 遍历 registry，找到对应 handler 的 RegexFilter 并修改 pattern
-        module_path = self.__class__.__module__
         injected_count = 0
         for handler_md in star_handlers_registry:
-            if handler_md.handler_module_path != module_path:
+            # 使用模糊匹配而不是精确匹配，因为 AstrBot 在不同加载方式下 module_path 可能不同
+            mp = handler_md.handler_module_path or ""
+            if "astrbot_plugin_tsugu" not in mp:
                 continue
             handler_name = handler_md.handler_name
             cmd_name = method_to_cmd.get(handler_name)
@@ -248,52 +250,41 @@ class TsuguPlugin(Star):
                 continue
 
             for event_filter in handler_md.event_filters:
-                if hasattr(event_filter, "pattern"):
-                    old_pattern = event_filter.pattern
-                    # 提取原 pattern 中的命令名
-                    m = re.match(r"^\^\(\?:(.+?)\)\\b", old_pattern)
-                    if m:
-                        existing_cmds = set(m.group(1).split("|"))
-                    else:
-                        m = re.match(r"^\^(.+?)\\b", old_pattern)
-                        if m:
-                            existing_cmds = {m.group(1)}
-                        else:
-                            continue
+                if not hasattr(event_filter, "regex_str"):
+                    continue
 
-                    new_aliases = cmd_new_aliases[cmd_name]
-                    all_cmds = existing_cmds | new_aliases
-                    # 构建新 pattern（使用 \\b 避免转义为 backspace）
-                    if len(all_cmds) == 1:
-                        new_pattern = f"^{list(all_cmds)[0]}\\b"
-                    else:
-                        new_pattern = f"^(?:{'|'.join(sorted(all_cmds))})\\b"
+                # 直接从 cmd_name + 别名重建 pattern（每次加载都是 fresh start，无需解析旧 pattern）
+                new_aliases = cmd_new_aliases[cmd_name]
+                all_cmds = {cmd_name} | new_aliases
+                if len(all_cmds) == 1:
+                    new_pattern = f"^{list(all_cmds)[0]}\\b"
+                else:
+                    new_pattern = f"^(?:{'|'.join(sorted(all_cmds))})\\b"
 
-                    event_filter.pattern = new_pattern
-                    # 如果 RegexFilter 内部编译了正则，需要重新编译
-                    if hasattr(event_filter, "_regex"):
-                        event_filter._regex = re.compile(new_pattern)
+                event_filter.regex_str = new_pattern
+                if hasattr(event_filter, "regex"):
+                    event_filter.regex = re.compile(new_pattern)
 
-                    injected_count += len(new_aliases)
-                    logger.info(f"命令 '{cmd_name}' 添加别名: {new_aliases}，pattern: {new_pattern}")
+                injected_count += len(new_aliases)
+                logger.info(f"命令 '{cmd_name}' 添加别名: {new_aliases}，pattern: {new_pattern}")
 
         # ── 自定义唤醒前缀注入 ──────────────────────────────────────
         prefix_injected = 0
         if self._wake_prefix:
             prefix_escaped = re.escape(self._wake_prefix)
             for handler_md in star_handlers_registry:
-                if handler_md.handler_module_path != module_path:
+                mp = handler_md.handler_module_path or ""
+                if "astrbot_plugin_tsugu" not in mp:
                     continue
                 for event_filter in handler_md.event_filters:
-                    if hasattr(event_filter, "pattern"):
-                        old_pattern = event_filter.pattern
+                    if hasattr(event_filter, "regex_str"):
+                        old_pattern = event_filter.regex_str
                         # 在 pattern 前面添加可选前缀匹配
-                        # 例如 ^查曲\b -> ^(?:/|!)?查曲\b
                         if old_pattern.startswith("^"):
                             new_pattern = f"^(?:{prefix_escaped})?{old_pattern[1:]}"
-                            event_filter.pattern = new_pattern
-                            if hasattr(event_filter, "_regex"):
-                                event_filter._regex = re.compile(new_pattern)
+                            event_filter.regex_str = new_pattern
+                            if hasattr(event_filter, "regex"):
+                                event_filter.regex = re.compile(new_pattern)
                             prefix_injected += 1
             logger.info(f"Tsugu 唤醒前缀注册完成: 前缀='{self._wake_prefix}', 共注入 {prefix_injected} 个 pattern")
 
