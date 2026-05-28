@@ -10,7 +10,9 @@ BanG Dream! 游戏助手，基于 tsugu-api-python
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from typing import List, Optional
 
 import tsugu_api_async
@@ -155,8 +157,8 @@ def _parse_server_args(args_str: str) -> tuple[Optional[int], list[str]]:
     "astrbot_plugin_tsugu",
     "QClaw",
     "BanG Dream! 游戏助手 (TsuguBangDreamBot)",
-    "1.3.0",
-    "https://github.com/Sov8forUs/astrbot_plugin_tsugu",
+    "1.4.0",
+    "https://github.com/buruqu/astrbot_plugin_tsugu",
 )
 class TsuguPlugin(Star):
     """Tsugu BanG Dream Bot AstrBot 插件"""
@@ -183,6 +185,9 @@ class TsuguPlugin(Star):
         settings.use_easy_bg = config.get("use_easy_bg", True)
         settings.compress = config.get("compress", True)
 
+        # Bandori Station Token 配置
+        self._bandori_station_token = config.get("bandori_station_token", "") or None
+
         # v1.3.0 新功能配置
         self._whitelist_enabled = config.get("whitelist_enabled", False)
         self._whitelist_groups = self._parse_whitelist(config.get("whitelist_groups", []))
@@ -193,12 +198,19 @@ class TsuguPlugin(Star):
         parsed_aliases = self._parse_aliases(raw_aliases)
         # 如果用户未配置别名（空或仅{}），使用内置默认别名
         if not parsed_aliases:
-            parsed_aliases = {"ycm": "车牌列表"}
+            parsed_aliases = {
+                "ycm": "车牌列表",
+                "有车吗": "车牌列表",
+            }
         self._command_aliases = parsed_aliases
         self._wake_prefix = config.get("wake_prefix", "")
 
         # 绑定验证会话 {user_key: {verify_code, server, action, player_id, created_at}}
         self._bind_sessions: dict = {}
+
+        # 无车牌时的默认图片路径
+        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        self._no_car_image_path = os.path.join(plugin_dir, "assets", "no_car.jpg")
 
         logger.info(f"Tsugu 插件已初始化 (白名单={'启用' if self._whitelist_enabled else '关闭'}, "
                      f"@唤醒={'启用' if self._at_wake_enabled else '关闭'}, "
@@ -256,10 +268,12 @@ class TsuguPlugin(Star):
                 # 直接从 cmd_name + 别名重建 pattern（每次加载都是 fresh start，无需解析旧 pattern）
                 new_aliases = cmd_new_aliases[cmd_name]
                 all_cmds = {cmd_name} | new_aliases
+                # 用 (?:\s|$) 替代 \b，兼容中文命令名
+                suffix = r"(?:\s|$)"
                 if len(all_cmds) == 1:
-                    new_pattern = f"^{list(all_cmds)[0]}\\b"
+                    new_pattern = f"^{list(all_cmds)[0]}{suffix}"
                 else:
-                    new_pattern = f"^(?:{'|'.join(sorted(all_cmds))})\\b"
+                    new_pattern = f"^(?:{'|'.join(sorted(all_cmds))}){suffix}"
 
                 event_filter.regex_str = new_pattern
                 if hasattr(event_filter, "regex"):
@@ -427,10 +441,27 @@ class TsuguPlugin(Star):
         if self._precheck(event):
             return
 
+        # 定期清理过期会话（防止内存泄漏）
+        current_time = time.time()
+        expired_keys = [
+            k for k, v in self._bind_sessions.items()
+            if current_time > v.get("expire", 0)
+        ]
+        for k in expired_keys:
+            self._bind_sessions.pop(k, None)
+        if expired_keys:
+            logger.info(f"已清理 {len(expired_keys)} 个过期绑定会话")
+
         user_key = self._user_key(event)
         session = self._bind_sessions.get(user_key)
 
         if not session:
+            return
+        
+        # 检查会话是否过期
+        if "expire" in session and time.time() > session["expire"]:
+            self._bind_sessions.pop(user_key, None)
+            yield self._yield_plain(event, "绑定验证已超时（10分钟），请重新使用 玩家绑定 或 解除绑定 开始新的流程")
             return
 
         # 从 message_str 中提取玩家 ID
@@ -960,7 +991,12 @@ class TsuguPlugin(Star):
             if chain:
                 yield self._yield_result(event, chain)
             else:
-                yield self._yield_plain(event, "当前没有车牌")
+                # 没有车牌时发送默认图片
+                if os.path.exists(self._no_car_image_path):
+                    img_chain = [Image.fromFileSystem(self._no_car_image_path)]
+                    yield self._yield_result(event, img_chain)
+                else:
+                    yield self._yield_plain(event, "当前没有车牌")
         except FailedException as e:
             yield self._yield_plain(event, e.response.get("data", "查询失败"))
         except Exception as e:
@@ -1046,15 +1082,18 @@ class TsuguPlugin(Star):
             "verify_code": verify_code,
             "server": server,
             "action": "bind",
+            "expire": time.time() + 600,  # 10分钟超时
         }
 
         yield self._yield_plain(event,
-            f"正在绑定来自 {server_id_to_full_name(server)} 账号，\n"
-            f"请将你的\n评论(个性签名)\n或者\n你的当前使用的卡组的卡组名(乐队编队名称)\n"
-            f"改为以下数字后，发送 绑定<玩家ID> 完成绑定\n"
-            f"例如: 绑定10000000\n"
-            f"验证码: {verify_code}\n\n"
-            f"发送 取消绑定 可取消本次操作"
+            f"正在绑定来自 {server_id_to_full_name(server)} 账号\n\n"
+            f"验证方式（二选一）：\n"
+            f"1. 将【评论/个性签名】改为：{verify_code}\n"
+            f"2. 将【卡组名/乐队编队名称】改为：{verify_code}\n\n"
+            f"修改后发送：绑定 <玩家ID>\n"
+            f"例如：绑定 10000000\n\n"
+            f"验证码：{verify_code}\n"
+            f"发送「取消绑定」可取消本次操作"
         )
 
     # ── 解除绑定 ──────────────────────────────────────────────────
@@ -1109,33 +1148,57 @@ class TsuguPlugin(Star):
             "server": server,
             "action": "unbind",
             "player_id": player_id,
+            "expire": time.time() + 600,  # 10分钟超时
         }
 
         yield self._yield_plain(event,
-            f"正在解除绑定来自 {server_id_to_full_name(server)} 账号 玩家ID: {player_id}\n"
-            f"请将你的\n评论(个性签名)\n或者\n你的当前使用的卡组的卡组名(乐队编队名称)\n"
-            f"改为以下数字后，发送 绑定<玩家ID> 完成解绑\n"
-            f"验证码: {verify_code}\n\n"
-            f"发送 取消绑定 可取消本次操作"
+            f"正在解除绑定来自 {server_id_to_full_name(server)} 账号\n"
+            f"玩家ID: {player_id}\n\n"
+            f"验证方式（二选一）：\n"
+            f"1. 将【评论/个性签名】改为：{verify_code}\n"
+            f"2. 将【卡组名/乐队编队名称】改为：{verify_code}\n\n"
+            f"修改后发送：绑定 <玩家ID>\n"
+            f"例如：绑定 {player_id}\n\n"
+            f"验证码：{verify_code}\n"
+            f"发送「取消绑定」可取消本次操作"
         )
 
-    # ── 玩家状态 ──────────────────────────────────────────────────
+    # ── 玩家状态 ──────────────────────────────────────────────
 
-    @filter.regex(r"^玩家状态\b")
-    async def cmd_player_info(self, event: AstrMessageEvent):
-        """玩家状态 [服务器名] — 查询自己的玩家状态"""
+    @filter.regex(r"^玩家状态(?:\s*(\d+))?(?:\s|$)")
+    async def cmd_player_info(self, event: AstrMessageEvent, player_index: str = ""):
+        """玩家状态 [服务器名|序号] — 查询自己的玩家状态
+
+        示例:
+            玩家状态        -> 查当前选中账号
+            玩家状态 jp     -> 查 jp 服账号
+            玩家状态 1      -> 查绑定列表第 1 个账号
+            玩家状态2       -> 查绑定列表第 2 个账号
+        """
         if self._precheck(event):
             return
-        raw = self._cmd_args(event)
-        server = None
-        if raw:
-            try:
-                server = server_name_to_id(raw)
-            except ValueError:
-                pass
 
+        raw = self._cmd_args(event).strip()
         platform = self._platform_name(event)
         user_id = event.get_sender_id()
+
+        server = None
+        index = None
+
+        # 优先处理正则捕获的数字（玩家状态1 / 玩家状态2）
+        if player_index and player_index.isdigit():
+            index = int(player_index) - 1  # 用户看到的 1-based，内部用 0-based
+            raw = ""  # 已处理，清空避免重复解析
+
+        # 再解析剩余参数（服务器名 或 数字序号）
+        if raw:
+            if raw.isdigit():
+                index = int(raw) - 1
+            else:
+                try:
+                    server = server_name_to_id(raw)
+                except ValueError:
+                    pass
 
         try:
             tsugu_user = await _get_tsugu_user(platform, user_id)
@@ -1148,11 +1211,8 @@ class TsuguPlugin(Star):
             yield self._yield_plain(event, "未绑定任何玩家，请先使用 玩家绑定")
             return
 
-        if server is None:
-            server = tsugu_user["mainServer"]
-
         try:
-            player = _get_user_player(tsugu_user, server)
+            player = _get_user_player(tsugu_user, server, index)
         except Exception as e:
             yield self._yield_plain(event, str(e))
             return
@@ -1168,6 +1228,7 @@ class TsuguPlugin(Star):
             yield self._yield_plain(event, e.response.get("data", "查询失败"))
         except Exception as e:
             yield self._yield_plain(event, f"查询出错: {e}")
+
 
     # ── 绑定列表 ──────────────────────────────────────────────────
 
@@ -1381,9 +1442,30 @@ class TsuguPlugin(Star):
         except Exception as e:
             yield self._yield_plain(event, f"关闭失败: {e}")
     
-    # ── 车牌消息拦截器 ────────────────────────────────────────────
+    # ── 车牌识别辅助方法（方案B） ────────────────────────────────────────────
     
-    @filter.regex(r"^[\d★☆]+$")
+    def _looks_like_car(self, text: str) -> bool:
+        """判断消息是否像是车牌号（参考 Ars1027 的 looks_like_car 思路）"""
+        CAR_KEYWORDS = {"缺", "满缺", "三火", "四火", "红", "黄", "蓝", "困难", "平铺", "补填"}
+        FAKE_CAR_KEYWORDS = {"麻将", "牛牛", "斗地主", "野兽", "德州"}
+        
+        # 排除 fake 关键词（非车牌场景）
+        if any(fk in text for fk in FAKE_CAR_KEYWORDS):
+            return False
+        
+        # 包含车牌关键词 → 是车牌
+        if any(kw in text for kw in CAR_KEYWORDS):
+            return True
+        
+        # 纯数字+星号，且长度适中 → 可能是车牌
+        if re.fullmatch(r"[\d★☆]+", text.strip()) and 5 <= len(text.strip()) <= 20:
+            return True
+        
+        return False
+    
+    # ── 车牌消息拦截器（方案B） ────────────────────────────────────────────
+    
+    @filter.regex(r".*")
     async def handle_room_number(self, event: AstrMessageEvent):
         """拦截车牌消息（纯数字+星级），提交到公共频道"""
         if self._precheck(event):
@@ -1392,6 +1474,10 @@ class TsuguPlugin(Star):
         room_number = event.message_str.strip()
         platform = self._platform_name(event)
         user_id = event.get_sender_id()
+        
+        # 方案B：先判断消息是否像是车牌
+        if not self._looks_like_car(room_number):
+            return  # 不是车牌，直接返回
         
         try:
             tsugu_user = await _get_tsugu_user(platform, user_id)
@@ -1403,7 +1489,16 @@ class TsuguPlugin(Star):
         
         # 提交车牌到公共频道
         try:
-            response = await tsugu_api_async.station_submit_room_number(room_number, platform, user_id)
+            room_number_int = int("".join(filter(str.isdigit, room_number)))
+            sender_name = event.get_sender_name() or user_id
+            response = await tsugu_api_async.station_submit_room_number(
+                room_number_int,   # number: int
+                room_number,        # raw_message: str
+                platform,           # platform: str
+                user_id,            # user_id: str
+                sender_name,        # user_name: str
+                bandori_station_token=self._bandori_station_token,  # 可选 token
+            )
             if response.get("status") == "success":
                 yield self._yield_plain(event, f"车牌 {room_number} 已提交到公共频道")
             else:

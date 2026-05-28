@@ -45,7 +45,7 @@
     "type": "text",
     "description": "命令别名",
     "hint": "JSON格式，如: {\"搜歌\":\"查曲\",\"查卡牌\":\"查卡\"}。键为别名，值为原命令名",
-    "default": "{\"ycm\":\"车牌列表\"}",
+    "default": "{\"ycm\":\"车牌列表\",\"有车吗\":\"车牌列表\"}",
     "editor_mode": true,
     "editor_language": "json"
   },
@@ -72,5 +72,11 @@
     "description": "回复引用原消息",
     "hint": "启用时回复消息会引用发送人的原始消息",
     "default": false
+  },
+  "bandori_station_token": {
+    "type": "string",
+    "description": "Bandori 车站令牌",
+    "hint": "Bandori Station API 令牌，留空则使用 Tsugu 后端默认配置",
+    "default": ""
   }
 }

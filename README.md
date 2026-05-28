@@ -1,288 +1,179 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.0-blue?style=flat-square" alt="version">
-  <img src="https://img.shields.io/badge/python-3.10+-blue?style=flat-square&logo=python" alt="python">
-  <img src="https://img.shields.io/badge/platform-AstrBot-7c3aed?style=flat-square" alt="platform">
-  <img src="https://img.shields.io/badge/game-BanG%20Dream!-ff69b4?style=flat-square" alt="game">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="license">
-</p>
+# Tsugu Bang Dream! 游戏助手
 
-<h1 align="center">🎸 astrbot_plugin_tsugu</h1>
-<p align="center"><strong>BanG Dream! 少女乐团派对 · 全能游戏助手</strong></p>
-<p align="center">为 <a href="https://github.com/Soulter/AstrBot">AstrBot</a> 平台打造的 Tsugu 插件，支持 <b>26 个命令</b>，覆盖曲目查询、卡牌图鉴、活动档线、玩家绑定、车牌管理等全部功能</p>
+> AstrBot 插件：BanG Dream! 少女乐团派对 全能游戏助手，基于 tsugu-api-python
 
 ---
 
-## 📖 简介
+## 🎮 功能特性
 
-`astrbot_plugin_tsugu` 是将 [TsuguBanGDreamBot](https://github.com/Yamamoto-2/tsugu-bangdream-bot) 的全部功能移植到 [AstrBot](https://github.com/Soulter/AstrBot) 平台的插件，基于 [tsugu-api-python](https://github.com/WindowsSov8forUs/tsugu-api-python) 与 Tsugu 后端通信。
-
-无论你是想查卡面、追活动档线、绑定游戏账号还是找车牌，一条消息就能搞定。
-
-> **当前版本**: `v1.3.0` | **命令数**: 26 | **状态**: 🟢 维护中
-
----
-
-## ✨ 功能一览
-
-### 🎵 曲目查询
-| 命令 | 说明 |
-|------|------|
-| `查曲` | 根据关键词或曲目 ID 查询曲目详情 |
-| `查谱面` | 查询曲目谱面（可指定难度） |
-| `分数表` | 查询歌曲分数排行榜 |
-| `随机曲目` | 随机推荐一首曲目 |
-
-### 🃏 卡牌 & 角色
-| 命令 | 说明 |
-|------|------|
-| `查卡` | 根据关键词或卡牌 ID 查询卡片信息 |
-| `查卡面` | 查询卡牌插画 / 原画 |
-| `查角色` | 根据关键词或角色 ID 查询角色详情 |
-| `抽卡模拟` | 模拟抽卡，试试手气 |
-
-### 🏆 活动 & 档线
-| 命令 | 说明 |
-|------|------|
-| `查活动` | 查询活动信息 |
-| `查卡池` | 查询卡池详情 |
-| `查试炼` | 查询活动试炼舞台信息 |
-| `ycx` | 查询指定档位预测线 |
-| `ycxall` | 查询所有档位预测线 |
-| `lsycx` | 查询历史档线数据 |
-
-### 🚗 车牌管理
-| 命令 | 说明 |
-|------|------|
-| `车牌列表` | 获取所有车牌 |
-| `开启车牌转发` | 开启后，发送的车牌自动提交到公共频道 |
-| `关闭车牌转发` | 关闭车牌转发功能 |
-
-### 👤 玩家数据
-| 命令 | 说明 |
-|------|------|
-| `玩家绑定` | 开始玩家数据绑定流程 |
-| `绑定` | 发送 `绑定<玩家ID>` 完成验证 |
-| `取消绑定` | 取消正在进行的绑定流程 |
-| `解除绑定` | 解除玩家绑定 |
-| `玩家状态` | 查询自己的玩家状态 |
-| `绑定列表` | 查看已绑定玩家列表 |
-| `查玩家` | 查询其他玩家的信息 |
-| `选择绑定` | 切换默认使用的绑定玩家 |
-| `主服务器` | 设置主服务器 |
-| `显示服务器` | 设置默认显示的服务器列表 |
+- **查曲** / **查卡** / **查卡面** / **查角色** / **查活动** / **查卡池**
+- **抽卡模拟** / **查谱面** / **分数表** / **查试炼**
+- **档线查询**（ycx / ycxall / lsycx）
+- **车牌系统**（车牌列表 / 车牌转发 / 智能识别）
+- **玩家绑定**（多服务器 / 多账号切换）
+- **随机曲目** / **主服务器设置** / **显示服务器配置**
 
 ---
 
-## 📥 安装
+## 📦 安装方法
 
-### 方式一：AstrBot 插件市场
+### 1. 下载插件
 
-在 AstrBot Dashboard → 插件管理 → 搜索 `astrbot_plugin_tsugu` → 一键安装
-
-### 方式二：手动安装
+将本插件放入 AstrBot 插件目录：
 
 ```bash
-# 1. 克隆到插件目录
-cd AstrBot/data/plugins/
+# 方式一：从 Releases 下载
+# 解压后放入 AstrBot data/plugins/ 目录
+
+# 方式二：克隆仓库
+cd ~/.astrbot/data/plugins/
 git clone https://github.com/buruqu/astrbot_plugin_tsugu.git
+```
 
-# 2. 安装依赖
-pip install tsugu-api-python httpx
+### 2. 安装依赖
 
-# 3. 重启 AstrBot
-# 或在 Dashboard 中重新加载插件
+```bash
+pip install tsugu-api-python
+```
+
+### 3. 重启 AstrBot
+
+```bash
+astrbot restart
 ```
 
 ---
 
-## 🚀 使用示例
+## ⚙️ 配置说明
 
-### 曲目 & 卡牌查询
-```
-查曲 1                    查曲 ag lv27
-查卡 1399                 查卡 绿 tsugu
-查卡面 1399               查角色 10
-查谱面 1                  查谱面 1 expert
-分数表                    分数表 cn
-随机曲目                  随机曲目 27
-```
-
-### 活动 & 档线
-```
-查活动 177                查卡池 922
-查试炼                    查试炼 157 -m
-ycx 1000                  ycx 1000 177 jp
-ycxall                    lsycx 1000
-抽卡模拟                  抽卡模拟 300 922
-```
-
-### 车牌管理
-```
-车牌列表
-开启车牌转发              关闭车牌转发
-```
-
-### 玩家绑定 & 数据
-```
-玩家绑定                  玩家绑定 cn
-绑定 10000000             取消绑定
-解除绑定                  解除绑定 jp
-玩家状态                  玩家状态 jp
-绑定列表                  查玩家 40474621 jp
-主服务器 日服              主服务器 cn
-显示服务器 国服 日服        显示服务器
-选择绑定 1
-```
-
----
-
-## ⚙️ 配置项
-
-所有配置在 AstrBot Dashboard 插件面板中操作，无需编辑配置文件：
-
-### 基础配置
+在 AstrBot Dashboard 中配置插件：
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| Tsugu 后端地址 | API 服务器地址 | `http://tsugubot.com:8080` |
-| 用户数据后端地址 | 用户数据服务器 | — |
-| 代理地址 | HTTP 代理（内网用） | — |
-| 简易背景 | 压缩图片加速响应 | 关 |
-| 压缩返回数据 | 减少传输数据量 | 关 |
-
-### v1.3.0 新增
-
-| 配置项 | 说明 |
-|--------|------|
-| 📋 白名单模式 | 仅白名单群号可用（私聊不受限） |
-| 📋 白名单群号 | WebUI 标签列表，直接添加/删除群号 |
-| 🔤 命令别名 | JSON 格式，如 `{"ycm":"车牌列表"}` |
-| 📣 @唤醒开关 | 开启后需 @bot 或带前缀才回复 |
-| ⌨️ 唤醒前缀 | 自定义前缀，如 `/` 或 `!` |
-| 👤 回复@发送人 | 在回复中 @ 触发用户 |
-| 💬 回复引用原消息 | 引用发送人的原始消息 |
+| `backend_url` | Tsugu 后端地址 | `http://tsugubot.com:8080` |
+| `userdata_backend_url` | 用户数据后端地址 | `http://tsugubot.com:8080` |
+| `proxy` | 代理地址（留空则不使用） | 空 |
+| `use_easy_bg` | 使用简易背景 | `true` |
+| `compress` | 压缩图片 | `true` |
+| `bandori_station_token` | Bandori Station API 令牌 | 空 |
+| `whitelist_enabled` | 启用白名单模式 | `false` |
+| `whitelist_groups` | 白名单群组列表 | `[]` |
+| `at_wake_enabled` | @唤醒功能 | `true` |
+| `at_sender_enabled` | 回复时 @发送人 | `false` |
+| `quote_reply_enabled` | 引用原消息 | `false` |
+| `wake_prefix` | 自定义唤醒前缀 | 空 |
+| `command_aliases` | 命令别名映射（JSON） | `{}` |
 
 ---
 
-## 🏗️ 技术架构
+## 📋 命令列表
 
-```
-┌──────────────┐     AstrBot Event      ┌─────────────────────┐
-│  QQ / 微信    │ ──────────────────────▶│  @filter.regex()    │
-│  / 其他平台   │                        │  正则匹配 26 条命令   │
-└──────────────┘                        └──────────┬──────────┘
-                                                   │
-                                          ┌────────▼──────────┐
-                                          │   _precheck()     │
-                                          │   白名单 / @唤醒   │
-                                          └────────┬──────────┘
-                                                   │
-┌──────────────────┐                       ┌───────▼──────────┐
-│  Tsugu Backend   │◀──── tsugu_api_async ─│  Command Handler │
-│  (bestdori.com)  │──── 返回 JSON ────────▶│  数据转换 & 回复  │
-└──────────────────┘                       └──────────────────┘
-```
-
-### 核心设计
-
-| 特性 | 实现方式 |
-|------|----------|
-| **全 Regex 方案** | 所有命令统一使用 `@filter.regex()`，非 `@filter.command()` |
-| **@唤醒统一控制** | 在 `_precheck()` 中集中检查，对全部命令生效 |
-| **命令别名注入** | `initialize()` 中动态修改 `RegexFilter.pattern` |
-| **唤醒前缀注入** | 可选前缀 `(?:前缀)?` 注入到所有 regex pattern |
-| **车牌自动转发** | Regex 拦截纯数字+星级消息，调用 `station_submit_room_number` |
-| **配置 fallback** | 用户配置为空时自动使用内置默认值 |
-
-### API 调用链
-
-```
-用户消息
-   │
-   ├─ 正则匹配 (@filter.regex)
-   │    └─ command_alias 动态注入
-   │
-   ├─ 前置检查 (_precheck)
-   │    ├─ 白名单检查
-   │    ├─ @唤醒检查 (可选)
-   │    └─ 前缀检查 (自定义前缀)
-   │
-   ├─ 参数解析 (基于 AstrBot event.message_str)
-   │    └─ _cmd_args() 去掉命令名，获取纯参数
-   │
-   ├─ API 调用 (tsugu_api_async)
-   │    ├─ search_song / search_card / search_event ...
-   │    ├─ bind_player / change_user_data ...
-   │    └─ station_submit_room_number
-   │
-   └─ 响应转换 (Tsugu _Response → AstrBot MessageChain)
-        ├─ type=string → Plain
-        └─ type=base64  → Image
-```
-
----
-
-## 🌍 服务器支持
-
-| 服务器 | 中文名 | 简称 | ID |
-|--------|--------|------|----|
-| JP | 日服 | `jp` | 0 |
-| EN | 国际服 | `en` | 1 |
-| TW | 台服 | `tw` | 2 |
-| CN | 国服 | `cn` | 3 |
-| KR | 韩服 | `kr` | 4 |
-
-命令中可通过中文名、简称或 ID 指定服务器，不指定则使用默认服务器。
-
----
-
-## 📦 依赖
-
-| 包名 | 版本 | 说明 |
+### 曲目相关
+| 命令 | 说明 | 示例 |
 |------|------|------|
-| [tsugu-api-python](https://pypi.org/project/tsugu-api-python/) | >= 1.5.0 | Tsugu API 异步调用库 |
-| [httpx](https://pypi.org/project/httpx/) | * | HTTP 客户端 |
-| AstrBot | v4+ | AstrBot 机器人框架 |
+| `查曲 <关键词>` | 查询曲目信息 | `查曲 光る星` |
+| `查谱面 <曲目ID> <难度>` | 查询谱面 | `查谱面 114 4` |
+| `分数表 <服务器> <曲目ID>` | 查询分数表 | `分数表 jp 114` |
+| `随机曲目` | 随机一首曲目 | `随机曲目` |
+
+### 卡牌相关
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `查卡 <关键词>` | 查询卡牌信息 | `查卡 2222` |
+| `查卡面 <卡牌ID>` | 查询卡面插画 | `查卡面 2222` |
+
+### 角色/活动/卡池
+| 命令 | 说明 |
+|------|------|
+| `查角色 <关键词>` | 查询角色信息 |
+| `查活动 <关键词>` | 查询活动信息 |
+| `查卡池 <关键词>` | 查询卡池信息 |
+| `查试炼` | 查询当前活动试炼 |
+
+### 档线查询
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `ycx <档位> <服务器>` | 查询预测线 | `ycx 200 jp` |
+| `ycxall <服务器>` | 查询所有档位 | `ycxall jp` |
+| `lsycx <档位> <服务器>` | 查询历史档线 | `lsycx 200 jp` |
+
+### 车牌系统
+| 命令 | 说明 |
+|------|------|
+| `车牌列表` / `ycm` / `有车吗` | 查询当前车牌 |
+| `开启车牌转发` | 开启车牌自动转发 |
+| `关闭车牌转发` | 关闭车牌自动转发 |
+| `（直接发送车牌号）` | 提交车牌（智能识别） |
+
+> 💡 无车牌时自动发送提示图片
+
+### 玩家绑定
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `玩家绑定 <服务器>` | 开始绑定流程 | `玩家绑定 jp` |
+| `绑定<验证码>` | 发送验证码完成绑定 | `绑定123456` |
+| `解除绑定` | 解除绑定 | `解除绑定` |
+| `玩家状态` | 查询绑定状态（支持序号） | `玩家状态` / `玩家状态 1` |
+| `绑定列表` | 查看所有绑定 | `绑定列表` |
+| `选择绑定 <index>` | 切换默认绑定 | `选择绑定 2` |
+
+### 服务器设置
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `主服务器 <服务器>` | 设置主服务器 | `主服务器 jp` |
+| `显示服务器 <服务器...>` | 设置显示服务器 | `显示服务器 jp cn` |
 
 ---
 
-## 🤝 贡献
+## 🆕 v1.4.0 更新日志
 
-欢迎提交 Issue 和 Pull Request！
+### ✨ 新增功能
+- 车牌无结果时发送提示图片（`assets/no_car.jpg`）
+- 新增快捷命令：`有车吗` → 车牌列表
+- 支持 `bandori_station_token` 配置项
+- 支持 `玩家状态1`/`玩家状态2` 查询绑定列表指定账号（同服多账号支持）
 
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'feat: add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+### 🐛 问题修复
+- 修复 `station_submit_room_number()` 缺少 `user_id` 和 `user_name` 参数导致的报错
+- 修复车牌识别正则过于宽泛，导致其他用户发送数字时也触发报错
+- 修复 `@register` 装饰器 `github_url` 与 `metadata.yaml` 不一致
+
+### ⚡ 优化改进
+- 车牌识别改用智能判断（参考 Ars1027 的 `looks_like_car()` 思路）
+- 绑定会话增加 10 分钟超时机制，防止内存泄漏
+- 定期清理过期绑定会话
+- 命令别名系统支持动态注入
 
 ---
 
 ## 🙏 致谢
 
-本项目的实现离不开以下开源项目：
+本插件的优化思路部分参考了 [Ars1027/astrbot_plugin_tsugu_bangdream](https://github.com/Ars1027/astrbot_plugin_tsugu_bangdream) 的实现，包括：
 
-| 项目 | 作者 | 说明 |
-|------|------|------|
-| 🎸 [TsuguBanGDreamBot](https://github.com/Yamamoto-2/tsugu-bangdream-bot) | Yamamoto-2 | 原版 Bot（TypeScript），一切功能的源头 |
-| 🔌 [nonebot-plugin-tsugu-bangdream-bot](https://github.com/WindowsSov8forUs/nonebot-plugin-tsugu-bangdream-bot) | WindowsSov8forUs | NoneBot2 适配版，本插件的直接参考 |
-| 📚 [tsugu-api-python](https://github.com/WindowsSov8forUs/tsugu-api-python) | WindowsSov8forUs | Python API 库，封装所有 Tsugu 后端调用 |
-| 🤖 [AstrBot](https://github.com/Soulter/AstrBot) | Soulter | 模块化 LLM 机器人框架 |
-| 🎵 [Bestdori](https://bestdori.com) | — | BanG Dream! 数据来源 |
-| 🎸 [BanG Dream!](https://bang-dream.bushiroad.co.jp/) | Bushiroad / Craft Egg | 少女乐团派对！|
+- **车牌智能识别算法**（`looks_like_car()` 思路）
+- **Fake 关键词过滤机制**（`FAKE_CAR_KEYWORDS` 设计）
+- **玩家绑定流程优化建议**
+
+感谢 Ars1027 的开源贡献！
 
 ---
 
-<p align="center">
-  <sub>Made with ❤️ by <a href="https://github.com/buruqu">buruqu</a> · Powered by <a href="https://github.com/Soulter/AstrBot">AstrBot</a></sub>
-</p>
+## 📖 技术栈
+
+- **框架**：AstrBot Star 插件系统
+- **API**：tsugu-api-python (异步版)
+- **消息组件**：AstrBot MessageChain (Plain / Image / At / Reply)
 
 ---
 
-<div align="center">
+## 🔗 相关链接
 
-**⭐ 如果这个插件对你有帮助，点颗 Star 吧！**
+- **插件仓库**：https://github.com/buruqu/astrbot_plugin_tsugu
+- **Tsugu API**：https://github.com/TSGuu/tsugu-api-python
+- **AstrBot 框架**：https://github.com/AstrBotDevs/AstrBot
 
-[![Star History Chart](https://api.star-history.com/svg?repos=buruqu/astrbot_plugin_tsugu&type=date)](https://star-history.com/#buruqu/astrbot_plugin_tsugu&date)
+---
 
-</div>
+## 📄 许可证
+
+MIT License
