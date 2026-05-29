@@ -1,2 +1,1 @@
-tsugu-api-python==1.5.10
-httpx>=0.24.0
+tsugu-api-python>=1.5.0

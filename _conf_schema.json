@@ -44,8 +44,8 @@
   "command_aliases": {
     "type": "text",
     "description": "命令别名",
-    "hint": "JSON格式，如: {\"搜歌\":\"查曲\",\"查卡牌\":\"查卡\"}。键为别名，值为原命令名",
-    "default": "{\"ycm\":\"车牌列表\",\"有车吗\":\"车牌列表\"}",
+    "hint": "JSON格式，如: {\"搜歌\":\"查曲\",\"查卡牌\":\"查卡\"}。键为别名，值为原命令名。留空使用内置默认别名（ycm/有车吗/车来/查卡牌/查询玩家等）",
+    "default": "",
     "editor_mode": true,
     "editor_language": "json"
   },
