@@ -20,10 +20,11 @@ import json
 import os
 import re
 import time
-from typing import List, Optional
+from typing import Optional
 
 import tsugu_api_async
 from tsugu_api_core.exception import FailedException
+from tsugu_api_core._network import Api
 from tsugu_api_core._settings import settings
 
 from astrbot.api.event import filter, AstrMessageEvent
@@ -131,19 +132,27 @@ def _load_car_keywords(plugin_dir: str) -> tuple[set[str], set[str]]:
 
 
 def check_left_digits(text: str) -> int:
-    """检查消息左侧是否为 5 或 6 位数字 (从原版移植)
-    
-    返回: 数字 (5-6位) 或 0 (不匹配)
-    """
-    # 优先匹配 6 位数字
-    match6 = re.match(r"^(\d{6})", text)
-    if match6:
-        return int(match6.group(1))
-    # 再匹配 5 位数字
-    match5 = re.match(r"^(\d{5})", text)
-    if match5:
-        return int(match5.group(1))
-    return 0
+    """返回消息左侧严格的 5 或 6 位 ASCII 房间号，否则返回 0。"""
+    match = re.match(r"^([0-9]{5,6})(?![0-9])", text.strip())
+    return int(match.group(1)) if match else 0
+
+
+def match_room_number(
+    text: str,
+    car_keywords: set[str],
+    fake_keywords: set[str],
+) -> int:
+    """识别上游定义的车牌消息并返回房间号。"""
+    room_number = check_left_digits(text)
+    if room_number == 0:
+        return 0
+
+    normalized = text.lower()
+    if any(keyword.lower() in normalized for keyword in fake_keywords):
+        return 0
+    if not any(keyword.lower() in normalized for keyword in car_keywords):
+        return 0
+    return room_number
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -172,6 +181,41 @@ async def _get_tsugu_user(platform: str, user_id: str) -> dict:
     except Exception as e:
         raise Exception(f"获取用户数据失败: {e}") from e
     return response["data"]
+
+
+async def _submit_room_number(
+    number: int,
+    raw_message: str,
+    platform: str,
+    user_id: str,
+    user_name: str,
+    bandori_station_token: Optional[str] = None,
+) -> dict:
+    """按 Tsugu 后端的毫秒时间戳契约提交车牌。
+
+    tsugu-api-python 1.5.10 在此接口使用秒级时间戳，会让后端把新车牌
+    立即判定为已过期，因此暂时复用其网络层直接发送正确的请求体。
+    """
+    data = {
+        "number": number,
+        "rawMessage": raw_message,
+        "platform": platform,
+        "userId": str(user_id),
+        "userName": str(user_name),
+        "time": int(time.time() * 1000),
+    }
+    if bandori_station_token:
+        data["bandoriStationToken"] = bandori_station_token
+
+    response = await Api(
+        settings.userdata_backend_url,
+        "/station/submitRoomNumber",
+        proxy=settings.userdata_backend_proxy,
+    ).apost(data)
+    result = response.json()
+    if not isinstance(result, dict):
+        raise ValueError("车牌提交接口返回了无效响应")
+    return result
 
 
 def _get_user_player(tsugu_user: dict, server: Optional[int] = None, index: Optional[int] = None) -> dict:
@@ -217,7 +261,7 @@ async def _fuzzy_search_server(text: str) -> int:
     "astrbot_plugin_tsugu",
     "QClaw",
     "BanG Dream! 游戏助手 (TsuguBangDreamBot)",
-    "2.0.0",
+    "2.0.1",
     "https://github.com/buruqu/astrbot_plugin_tsugu",
 )
 class TsuguPlugin(Star):
@@ -290,6 +334,11 @@ class TsuguPlugin(Star):
                 "默认玩家ID": "选择绑定",
                 "默认玩家": "选择绑定",
                 "玩家ID": "选择绑定",
+                # 抽卡别名
+                "抽卡": "抽卡模拟",
+                "单抽": "抽卡模拟",
+                "十连": "抽卡模拟",
+                "新手十连": "抽卡模拟",
                 # 分数表别名
                 "查询分数表": "分数表",
                 "查分数表": "分数表",
@@ -444,19 +493,33 @@ class TsuguPlugin(Star):
     def _platform_name(self, event: AstrMessageEvent) -> str:
         """获取平台名称，用于 tsugu API
         
-        注意: QQ 平台统一使用 'red'，onebot/chronocat 会被后端处理为 red
+        注意: QQ 平台统一使用 'red'，与上游的 OneBot/NapCat 映射保持一致
         """
-        pid = event.get_platform_id()
-        if "qq" in pid or "aiocqhttp" in pid:
+        platform_id = str(event.get_platform_id() or "")
+        get_platform_name = getattr(event, "get_platform_name", None)
+        platform_name = (
+            str(get_platform_name() or "") if callable(get_platform_name) else ""
+        )
+        platform_hint = f"{platform_name} {platform_id}".lower()
+
+        qq_adapters = (
+            "qq",
+            "aiocqhttp",
+            "onebot",
+            "llonebot",
+            "napcat",
+            "chronocat",
+            "red",
+        )
+        if any(adapter in platform_hint for adapter in qq_adapters):
             return "red"
-        elif "weixin" in pid or "wechat" in pid:
+        if "weixin" in platform_hint or "wechat" in platform_hint:
             return "weixin"
-        elif "telegram" in pid:
+        if "telegram" in platform_hint:
             return "telegram"
-        elif "discord" in pid:
+        if "discord" in platform_hint:
             return "discord"
-        else:
-            return pid
+        return platform_name or platform_id
 
     def _cmd_args(self, event: AstrMessageEvent) -> str:
         """获取命令参数（去掉命令名后的文本）"""
@@ -771,14 +834,31 @@ class TsuguPlugin(Star):
         except Exception as e:
             yield self._yield_plain(event, f"查询出错: {e}")
 
-    @filter.regex(r"^抽卡模拟\b")
+    @filter.regex(r"^(?:抽卡|抽卡模拟)\b")
     async def cmd_gacha_simulate(self, event: AstrMessageEvent):
         if self._precheck(event):
             return
         raw = self._cmd_args(event)
         parts = raw.split() if raw else []
-        times = int(parts[0]) if parts and parts[0].isdigit() else 10
-        gacha_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+        invoked_command = event.message_str.strip().split(None, 1)[0]
+        if self._wake_prefix and invoked_command.startswith(self._wake_prefix):
+            invoked_command = invoked_command[len(self._wake_prefix):]
+        times = 1 if invoked_command == "单抽" else 10
+        gacha_id = None
+
+        for part in parts:
+            if part == "十连":
+                times = 10
+            elif part == "单抽":
+                times = 1
+            elif part.isdigit():
+                number = int(part)
+                if number <= 50:
+                    times = number
+                else:
+                    gacha_id = number
+
+        times = max(1, min(times, 100))
 
         try:
             tsugu_user = await _get_tsugu_user(self._platform_name(event), event.get_sender_id())
@@ -1487,71 +1567,61 @@ class TsuguPlugin(Star):
     # 车牌消息拦截器 (从原版移植 checkLeftDigits + car_keyword 逻辑)
     # ═══════════════════════════════════════════════════════════════════════════
 
-    @filter.regex(r".*")
+    @filter.event_message_type(filter.EventMessageType.ALL)
     async def handle_room_number(self, event: AstrMessageEvent):
-        """拦截车牌消息，提交到公共频道
+        """被动识别车牌消息并静默提交到公共频道。
         
         逻辑 (从原版移植):
         1. checkLeftDigits 检测左侧 5-6 位数字
         2. 检查消息是否包含 car 关键词且不含 fake 关键词
         3. 检查用户是否开启车牌转发
-        4. 提交到 BandoriStation 并回复提交结果
+        4. 使用毫秒时间戳提交到 Tsugu 车站
         """
-        if self._precheck(event):
+        # 被动转发不应依赖命令的 @/唤醒词，只遵守插件白名单。
+        if not self._check_whitelist(event):
             return
         
-        msg = event.message_str.strip()
-        
-        # 1. 检测左侧 5-6 位数字 (从原版移植)
-        room_number = check_left_digits(msg)
+        msg = (event.message_str or "").strip()
+        room_number = match_room_number(
+            msg,
+            self._car_keywords,
+            self._fake_keywords,
+        )
         if room_number == 0:
-            return  # 不是车牌格式
-        
-        # 2. 检查 car/fake 关键词 (从原版移植)
-        msg_lower = msg.lower()
-        
-        # 检查是否包含 fake 关键词
-        for fake_kw in self._fake_keywords:
-            if fake_kw.lower() in msg_lower:
-                return  # 是假车牌，不处理
-        
-        # 检查是否包含 car 关键词
-        is_car = False
-        for car_kw in self._car_keywords:
-            if car_kw.lower() in msg_lower:
-                is_car = True
-                break
-        
-        if not is_car:
-            return  # 不是车牌
+            return
         
         platform = self._platform_name(event)
-        user_id = event.get_sender_id()
+        user_id = str(event.get_sender_id())
         
-        # 3. 检查用户是否开启车牌转发
         try:
             tsugu_user = await _get_tsugu_user(platform, user_id)
-            if not tsugu_user.get("shareRoomNumber", False):
-                return  # 未开启，不处理
-        except Exception:
+            if not tsugu_user.get("shareRoomNumber", True):
+                return
+        except Exception as e:
+            logger.debug(f"读取车牌转发设置失败 ({platform}:{user_id}): {e}")
             return
         
-        # 4. 提交车牌到公共频道
         try:
             sender_name = event.get_sender_name() or user_id
-            response = await tsugu_api_async.station_submit_room_number(
+            response = await _submit_room_number(
                 room_number,
                 msg,
                 platform,
                 user_id,
                 sender_name,
-                bandori_station_token=self._bandori_station_token,
+                self._bandori_station_token,
             )
             if response.get("status") == "success":
-                yield self._yield_plain(event, f"车牌 {room_number} 已提交到公共频道")
+                logger.info(f"车牌 {room_number} 已静默提交到公共频道")
             else:
-                yield self._yield_plain(event, f"提交失败: {response.get('data', '未知错误')}")
+                logger.warning(
+                    f"车牌 {room_number} 提交失败: "
+                    f"{response.get('data', '未知错误')}"
+                )
         except FailedException as e:
-            yield self._yield_plain(event, e.response.get("data", "提交失败"))
+            logger.warning(
+                f"车牌 {room_number} 提交失败: "
+                f"{e.response.get('data', '未知错误')}"
+            )
         except Exception as e:
-            yield self._yield_plain(event, f"提交出错: {e}")
+            logger.warning(f"车牌 {room_number} 提交出错: {e}")

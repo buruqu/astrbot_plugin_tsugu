@@ -13,7 +13,7 @@
 - **玩家绑定**（多服务器 / 多账号切换）
 - **随机曲目** / **主服务器设置** / **显示服务器配置**
 - **服务器名模糊搜索**（自动匹配模糊输入的服务器名）
-- **20+ 默认命令别名**（ycm / 查卡牌 / 查插画 / 查stage 等）
+- **30+ 默认命令别名**（ycm / 查卡牌 / 单抽 / 十连 / 查stage 等）
 - **车牌关键词外置配置**（car_keyword.json，41 car + 34 fake 关键词）
 
 ---
@@ -61,7 +61,7 @@ astrbot restart
 | `bandori_station_token` | Bandori Station API 令牌 | 空 |
 | `whitelist_enabled` | 启用白名单模式 | `false` |
 | `whitelist_groups` | 白名单群组列表 | `[]` |
-| `at_wake_enabled` | @唤醒功能 | `true` |
+| `at_wake_enabled` | @唤醒功能（不影响车牌被动转发） | `true` |
 | `at_sender_enabled` | 回复时 @发送人 | `false` |
 | `quote_reply_enabled` | 引用原消息 | `false` |
 | `wake_prefix` | 自定义唤醒前缀 | 空 |
@@ -128,6 +128,22 @@ astrbot restart
 
 ---
 
+## 🆕 v2.0.1 更新日志
+
+### 🐛 问题修复
+- 修复普通群消息因 `at_wake_enabled` 被拦截，必须 @机器人后才会收集车牌的问题
+- 修复 `tsugu-api-python 1.5.10` 使用秒级时间戳，导致后端将刚提交的车牌立即判定为过期的问题
+- 严格识别消息开头的 5 或 6 位 ASCII 房间号，不再截取 7 位及以上数字
+
+### ⚡ 优化改进
+- 被动车牌监听改用 AstrBot 全消息事件，不再伪装成通配正则命令
+- QQ 平台映射新增 OneBot、LLOneBot、NapCat、Chronocat 兼容
+- 用户数据缺少 `shareRoomNumber` 字段时沿用上游默认开启行为
+- 车牌提交恢复为上游一致的静默模式，成功与失败信息写入 AstrBot 日志
+- 保留并完善 `抽卡`、`单抽`、`十连`、`新手十连` 别名
+
+---
+
 ## 🆕 v2.0.0 更新日志
 
 ### ✨ 新增功能
@@ -135,7 +151,7 @@ astrbot restart
 - 车牌识别改用 `checkLeftDigits` 左侧数字检测逻辑（先检测消息开头5-6位数字，再匹配 car/fake 关键词），大幅减少误触发
 - 车牌列表支持关键词过滤（`车牌列表 <关键词>` / `ycm <关键词>`）
 - 服务器名模糊搜索（调用 `tsugu_api_async.fuzzy_search`，支持模糊输入服务器名）
-- 20个默认命令别名（从原版 `.alias()` / `.shortcut()` 移植）：
+- 默认命令别名（从原版 `.alias()` / `.shortcut()` 移植）：
   - 车牌列表：ycm / 有车吗 / 车来
   - 查卡：查卡牌
   - 查卡面：查卡插画 / 查插画

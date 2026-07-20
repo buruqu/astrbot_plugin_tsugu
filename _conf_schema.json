@@ -58,7 +58,7 @@
   "at_wake_enabled": {
     "type": "bool",
     "description": "@唤醒开关",
-    "hint": "启用时需@bot或使用唤醒前缀才回复（推荐启用）；关闭时任何消息均可触发命令",
+    "hint": "启用时需@bot或使用唤醒前缀才回复（推荐启用）；车牌被动转发不受此项影响",
     "default": true
   },
   "at_sender_enabled": {
