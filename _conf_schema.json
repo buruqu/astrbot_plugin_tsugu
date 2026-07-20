@@ -29,6 +29,24 @@
     "hint": "压缩返回数据以减少数据传输量",
     "default": true
   },
+  "request_timeout": {
+    "type": "int",
+    "description": "请求超时秒数",
+    "hint": "访问 Tsugu 后端的单次请求超时，网络较慢时可适当增大",
+    "default": 60
+  },
+  "max_retries": {
+    "type": "int",
+    "description": "请求重试次数",
+    "hint": "Tsugu 后端请求失败后的自动重试次数",
+    "default": 3
+  },
+  "max_gacha_draws": {
+    "type": "int",
+    "description": "单次最大抽卡数",
+    "hint": "限制抽卡模拟的单次次数；原版示例需要 300 抽，默认允许 300",
+    "default": 300
+  },
   "whitelist_enabled": {
     "type": "bool",
     "description": "白名单模式",
@@ -44,7 +62,7 @@
   "command_aliases": {
     "type": "text",
     "description": "命令别名",
-    "hint": "JSON格式，如: {\"搜歌\":\"查曲\",\"查卡牌\":\"查卡\"}。键为别名，值为原命令名。留空使用内置默认别名（ycm/有车吗/车来/查卡牌/查询玩家等）",
+    "hint": "JSON格式，如: {\"搜歌\":\"查曲\"}。键为别名，值为原命令名；配置内容会与原版内置别名合并，同名项以这里为准",
     "default": "",
     "editor_mode": true,
     "editor_language": "json"

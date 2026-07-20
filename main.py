@@ -40,14 +40,22 @@ from astrbot.core.star.star_handler import star_handlers_registry
 # 服务器名称工具 (从原版移植)
 # ═══════════════════════════════════════════════════════════════════════════
 
+VALID_SERVER_IDS = {0, 1, 2, 3, 4}
+DEFAULT_DISPLAYED_SERVERS = [3, 0]
+
+
 def server_name_to_id(server: str) -> int:
     """服务器名称 -> ID (支持数字/全名/缩写)"""
     mapping = {
         "0": 0, "1": 1, "2": 2, "3": 3, "4": 4,
-        "日服": 0, "国际服": 1, "台服": 2, "国服": 3, "韩服": 4,
+        "日": 0, "日本": 0, "日服": 0, "日本服": 0,
+        "国际": 1, "英": 1, "英语": 1, "国际服": 1,
+        "台": 2, "台湾": 2, "台服": 2, "台湾服": 2,
+        "国": 3, "中国": 3, "国服": 3, "国内服": 3,
+        "韩": 4, "韩国": 4, "韩服": 4, "韩国服": 4,
         "jp": 0, "en": 1, "tw": 2, "cn": 3, "kr": 4,
     }
-    result = mapping.get(server.lower() if server else "")
+    result = mapping.get(server.strip().lower() if server else "")
     if result is None:
         raise ValueError(f"服务器不存在: {server}")
     return result
@@ -75,6 +83,9 @@ def server_id_to_short_name(server: int) -> str:
 DIFFICULTY_MAP = {
     "easy": 0, "normal": 1, "hard": 2, "expert": 3, "special": 4,
     "ez": 0, "nm": 1, "hd": 2, "ex": 3, "sp": 4,
+    "简单": 0, "简": 0, "普通": 1, "普": 1,
+    "困难": 2, "困": 2, "专家": 3, "专": 3,
+    "特殊": 4, "特": 4,
     "0": 0, "1": 1, "2": 2, "3": 3, "4": 4,
 }
 
@@ -84,7 +95,7 @@ TIER_LISTS = {
     "tw": [100, 500],
     "en": [50, 100, 300, 500, 1000, 2000, 2500],
     "kr": [100],
-    "cn": [20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 2000, 3000, 4000, 5000, 10000, 20000, 30000, 50000],
+    "cn": [20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 1500, 2000, 3000, 4000, 5000, 10000, 20000, 30000, 50000],
 }
 
 
@@ -159,12 +170,44 @@ def match_room_number(
 # API 响应转 AstrBot 消息链
 # ═══════════════════════════════════════════════════════════════════════════
 
-def response_to_chain(response: list) -> list:
-    """tsugu _Response -> AstrBot MessageChain"""
+class TsuguResponseError(RuntimeError):
+    """Tsugu API 返回了业务失败或无效结构。"""
+
+
+def _require_success_response(response: object, fallback: str) -> object:
+    if not isinstance(response, dict):
+        raise TsuguResponseError(f"{fallback}: 响应格式无效")
+    if response.get("status") != "success":
+        raise TsuguResponseError(str(response.get("data") or fallback))
+    return response.get("data")
+
+
+def _failed_exception_message(error: Exception, fallback: str) -> str:
+    response = getattr(error, "response", None)
+    if isinstance(response, dict):
+        return str(response.get("data") or fallback)
+    return str(error) or fallback
+
+
+def response_to_chain(response: object) -> list:
+    """将 Tsugu 查询响应安全转换为 AstrBot 消息链。"""
+    if isinstance(response, dict):
+        if response.get("status") == "failed":
+            return [Plain(str(response.get("data") or "请求失败"))]
+        response = response.get("data", [])
+    if not isinstance(response, list):
+        return [Plain(str(response))] if response not in (None, "") else []
+
     chain: list = []
     for item in response:
+        if isinstance(item, str):
+            chain.append(Plain(item))
+            continue
+        if not isinstance(item, dict):
+            logger.warning(f"忽略无法识别的 Tsugu 响应项: {type(item).__name__}")
+            continue
         if item.get("type") == "string":
-            chain.append(Plain(item["string"]))
+            chain.append(Plain(str(item.get("string", ""))))
         elif item.get("type") == "base64":
             b64_data = item.get("string", "")
             if b64_data:
@@ -172,15 +215,96 @@ def response_to_chain(response: list) -> list:
     return chain
 
 
+def _normalize_tsugu_user(data: object) -> dict:
+    if not isinstance(data, dict):
+        raise TsuguResponseError("用户数据格式无效")
+
+    normalized = dict(data)
+    try:
+        main_server = int(data.get("mainServer", 3))
+    except (TypeError, ValueError):
+        main_server = 3
+    if main_server not in VALID_SERVER_IDS:
+        main_server = 3
+
+    displayed_servers: list[int] = []
+    raw_displayed = data.get("displayedServerList", DEFAULT_DISPLAYED_SERVERS)
+    if isinstance(raw_displayed, (list, tuple)):
+        for value in raw_displayed:
+            try:
+                server = int(value)
+            except (TypeError, ValueError):
+                continue
+            if server in VALID_SERVER_IDS and server not in displayed_servers:
+                displayed_servers.append(server)
+    if not displayed_servers:
+        displayed_servers = list(DEFAULT_DISPLAYED_SERVERS)
+
+    players: list[dict] = []
+    raw_players = data.get("userPlayerList", [])
+    if isinstance(raw_players, list):
+        for player in raw_players:
+            if not isinstance(player, dict):
+                continue
+            try:
+                player_id = int(player.get("playerId"))
+                server = int(player.get("server"))
+            except (TypeError, ValueError):
+                continue
+            if player_id > 0 and server in VALID_SERVER_IDS:
+                players.append({**player, "playerId": player_id, "server": server})
+
+    try:
+        player_index = int(data.get("userPlayerIndex", 0))
+    except (TypeError, ValueError):
+        player_index = 0
+    if not players or player_index < 0 or player_index >= len(players):
+        player_index = 0
+
+    normalized.update(
+        {
+            "mainServer": main_server,
+            "displayedServerList": displayed_servers,
+            "shareRoomNumber": bool(data.get("shareRoomNumber", True)),
+            "userPlayerIndex": player_index,
+            "userPlayerList": players,
+        }
+    )
+    return normalized
+
+
 async def _get_tsugu_user(platform: str, user_id: str) -> dict:
     """获取 tsugu 用户数据"""
     try:
         response = await tsugu_api_async.get_user_data(platform, user_id)
     except FailedException as e:
-        raise Exception(e.response.get("data", str(e))) from e
+        raise TsuguResponseError(_failed_exception_message(e, "获取用户数据失败")) from e
     except Exception as e:
-        raise Exception(f"获取用户数据失败: {e}") from e
-    return response["data"]
+        raise TsuguResponseError(f"获取用户数据失败: {e}") from e
+    return _normalize_tsugu_user(
+        _require_success_response(response, "获取用户数据失败")
+    )
+
+
+async def _change_user_data(platform: str, user_id: str, update: dict) -> None:
+    try:
+        response = await tsugu_api_async.change_user_data(platform, user_id, update)
+    except FailedException as e:
+        raise TsuguResponseError(
+            _failed_exception_message(e, "更新用户数据失败")
+        ) from e
+    _require_success_response(response, "更新用户数据失败")
+
+
+async def _request_bind_code(platform: str, user_id: str) -> str:
+    response = await tsugu_api_async.bind_player_request(platform, user_id)
+    data = _require_success_response(response, "获取绑定验证码失败")
+    if not isinstance(data, dict) or "verifyCode" not in data:
+        raise TsuguResponseError("绑定验证码响应格式无效")
+    verify_code = str(data["verifyCode"])
+    if not re.fullmatch(r"[0-9]{5}", verify_code):
+        raise TsuguResponseError("绑定验证码格式无效")
+    return verify_code
 
 
 async def _submit_room_number(
@@ -189,6 +313,7 @@ async def _submit_room_number(
     platform: str,
     user_id: str,
     user_name: str,
+    avatar_url: Optional[str] = None,
     bandori_station_token: Optional[str] = None,
 ) -> dict:
     """按 Tsugu 后端的毫秒时间戳契约提交车牌。
@@ -204,6 +329,8 @@ async def _submit_room_number(
         "userName": str(user_name),
         "time": int(time.time() * 1000),
     }
+    if avatar_url:
+        data["avatarUrl"] = avatar_url
     if bandori_station_token:
         data["bandoriStationToken"] = bandori_station_token
 
@@ -220,9 +347,9 @@ async def _submit_room_number(
 
 def _get_user_player(tsugu_user: dict, server: Optional[int] = None, index: Optional[int] = None) -> dict:
     """从 tsugu 用户数据中获取指定服务器的绑定玩家"""
-    server = server if server is not None else tsugu_user["mainServer"]
-    player_list = tsugu_user["userPlayerList"]
-    player_index = index if index is not None else tsugu_user["userPlayerIndex"]
+    server = server if server is not None else tsugu_user.get("mainServer", 3)
+    player_list = tsugu_user.get("userPlayerList", [])
+    player_index = index if index is not None else tsugu_user.get("userPlayerIndex", 0)
 
     if not player_list:
         raise ValueError("用户未绑定玩家")
@@ -231,6 +358,9 @@ def _get_user_player(tsugu_user: dict, server: Optional[int] = None, index: Opti
         if index < 0 or index >= len(player_list):
             raise ValueError("无效的绑定信息ID")
         return player_list[index]
+
+    if not isinstance(player_index, int) or not 0 <= player_index < len(player_list):
+        player_index = 0
 
     if player_list[player_index]["server"] == server:
         return player_list[player_index]
@@ -246,11 +376,110 @@ async def _fuzzy_search_server(text: str) -> int:
     """模糊搜索服务器名 (从原版移植)"""
     try:
         result = await tsugu_api_async.fuzzy_search(text)
-        if result and "server" in result and result["server"]:
-            return result["server"][0]
+        data = result.get("data", result) if isinstance(result, dict) else {}
+        servers = data.get("server", []) if isinstance(data, dict) else []
+        if servers:
+            server = int(servers[0])
+            if server in VALID_SERVER_IDS:
+                return server
     except Exception:
         pass
     return -1
+
+
+async def _resolve_server_name(text: str) -> int:
+    try:
+        return server_name_to_id(text)
+    except ValueError:
+        server = await _fuzzy_search_server(text)
+        if server in VALID_SERVER_IDS:
+            return server
+        raise ValueError(f"服务器不存在: {text}") from None
+
+
+async def _resolve_difficulty(text: str) -> int:
+    key = text.strip().lower()
+    if key in DIFFICULTY_MAP:
+        return DIFFICULTY_MAP[key]
+    try:
+        result = await tsugu_api_async.fuzzy_search(key)
+        data = result.get("data", result) if isinstance(result, dict) else {}
+        difficulties = data.get("difficulty", []) if isinstance(data, dict) else []
+        if difficulties:
+            difficulty = int(difficulties[0])
+            if difficulty in VALID_SERVER_IDS:
+                return difficulty
+    except Exception:
+        pass
+    raise ValueError(f"未知难度: {text}")
+
+
+def _parse_gacha_arguments(
+    invoked_command: str,
+    raw: str,
+    max_times: int,
+) -> tuple[int, Optional[int]]:
+    explicit_times = 1 if invoked_command == "单抽" else None
+    if invoked_command in {"十连", "新手十连"}:
+        explicit_times = 10
+
+    numbers: list[int] = []
+    for part in raw.split():
+        if part == "单抽":
+            explicit_times = 1
+        elif part in {"十连", "新手十连"}:
+            explicit_times = 10
+        elif re.fullmatch(r"[0-9]+", part):
+            numbers.append(int(part))
+        else:
+            raise ValueError(f"无法识别的抽卡参数: {part}")
+
+    if explicit_times is not None:
+        if len(numbers) > 1:
+            raise ValueError("单抽/十连模式最多指定一个卡池ID")
+        times = explicit_times
+        gacha_id = numbers[0] if numbers else None
+    else:
+        if len(numbers) > 2:
+            raise ValueError("抽卡模拟最多接受抽卡次数和卡池ID两个数字")
+        times = numbers[0] if numbers else 10
+        gacha_id = numbers[1] if len(numbers) > 1 else None
+
+    if times < 1 or times > max_times:
+        raise ValueError(f"抽卡次数必须在 1-{max_times} 之间")
+    return times, gacha_id
+
+
+def _parse_event_stage_arguments(raw: str) -> tuple[Optional[int], bool]:
+    event_id = None
+    meta = False
+    for part in raw.split():
+        if part == "-m":
+            meta = True
+        elif re.fullmatch(r"[0-9]+", part) and event_id is None:
+            event_id = int(part)
+        else:
+            raise ValueError(f"无法识别的试炼参数: {part}")
+    return event_id, meta
+
+
+async def _parse_event_server_arguments(
+    parts: list[str],
+) -> tuple[Optional[int], Optional[int]]:
+    if len(parts) > 2:
+        raise ValueError("参数过多，应为 [活动ID] [服务器名]")
+    event_id = None
+    server = None
+    if parts:
+        if re.fullmatch(r"[0-9]+", parts[0]):
+            event_id = int(parts[0])
+        else:
+            server = await _resolve_server_name(parts[0])
+    if len(parts) == 2:
+        if event_id is None:
+            raise ValueError("服务器名前只能填写活动ID")
+        server = await _resolve_server_name(parts[1])
+    return event_id, server
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -261,7 +490,7 @@ async def _fuzzy_search_server(text: str) -> int:
     "astrbot_plugin_tsugu",
     "QClaw",
     "BanG Dream! 游戏助手 (TsuguBangDreamBot)",
-    "2.0.1",
+    "2.1.0",
     "https://github.com/buruqu/astrbot_plugin_tsugu",
 )
 class TsuguPlugin(Star):
@@ -295,6 +524,9 @@ class TsuguPlugin(Star):
 
         settings.use_easy_bg = config.get("use_easy_bg", True)
         settings.compress = config.get("compress", True)
+        settings.timeout = max(1, int(config.get("request_timeout", 60)))
+        settings.max_retries = max(0, int(config.get("max_retries", 3)))
+        self._max_gacha_draws = max(1, int(config.get("max_gacha_draws", 300)))
 
         # Bandori Station Token 配置
         self._bandori_station_token = config.get("bandori_station_token", "") or None
@@ -307,57 +539,48 @@ class TsuguPlugin(Star):
         self._quote_reply_enabled = config.get("quote_reply_enabled", False)
         raw_aliases = config.get("command_aliases", "{}")
         parsed_aliases = self._parse_aliases(raw_aliases)
-        # 默认别名 (从原版移植更多)
-        if not parsed_aliases:
-            parsed_aliases = {
-                # 车牌列表别名
-                "ycm": "车牌列表",
-                "有车吗": "车牌列表",
-                "车来": "车牌列表",
-                # 查卡别名
-                "查卡牌": "查卡",
-                # 查卡面别名
-                "查卡插画": "查卡面",
-                "查插画": "查卡面",
-                # 查玩家别名
-                "查询玩家": "查玩家",
-                # 主服务器别名
-                "服务器模式": "主服务器",
-                "切换服务器": "主服务器",
-                # 显示服务器别名
-                "设置默认服务器": "显示服务器",
-                "默认服务器": "显示服务器",
-                # 绑定列表别名
-                "玩家列表": "绑定列表",
-                "玩家信息列表": "绑定列表",
-                # 选择绑定别名
-                "默认玩家ID": "选择绑定",
-                "默认玩家": "选择绑定",
-                "玩家ID": "选择绑定",
-                # 抽卡别名
-                "抽卡": "抽卡模拟",
-                "单抽": "抽卡模拟",
-                "十连": "抽卡模拟",
-                "新手十连": "抽卡模拟",
-                # 分数表别名
-                "查询分数表": "分数表",
-                "查分数表": "分数表",
-                "查询分数榜": "分数表",
-                "查分数榜": "分数表",
-                # 查试炼别名
-                "查stage": "查试炼",
-                "查舞台": "查试炼",
-                "查festival": "查试炼",
-                "查5v5": "查试炼",
-                # ycxall 别名
-                "myycx": "ycxall",
-                # 随机曲目别名
-                "随机": "随机曲目",
-                # 解除绑定别名
-                "解绑玩家": "解除绑定",
-            }
-        self._command_aliases = parsed_aliases
+        default_aliases = {
+            "ycm": "车牌列表",
+            "有车吗": "车牌列表",
+            "车来": "车牌列表",
+            "查卡牌": "查卡",
+            "查卡插画": "查卡面",
+            "查插画": "查卡面",
+            "查询玩家": "查玩家",
+            "绑定玩家": "玩家绑定",
+            "解绑玩家": "解除绑定",
+            "服务器模式": "主服务器",
+            "切换服务器": "主服务器",
+            "设置显示服务器": "显示服务器",
+            "设置默认服务器": "显示服务器",
+            "默认服务器": "显示服务器",
+            "玩家状态列表": "绑定列表",
+            "玩家列表": "绑定列表",
+            "玩家信息列表": "绑定列表",
+            "玩家默认ID": "选择绑定",
+            "默认玩家ID": "选择绑定",
+            "默认玩家": "选择绑定",
+            "玩家ID": "选择绑定",
+            "抽卡": "抽卡模拟",
+            "单抽": "抽卡模拟",
+            "十连": "抽卡模拟",
+            "新手十连": "抽卡模拟",
+            "查询分数表": "分数表",
+            "查分数表": "分数表",
+            "查询分数榜": "分数表",
+            "查分数榜": "分数表",
+            "查stage": "查试炼",
+            "查舞台": "查试炼",
+            "查festival": "查试炼",
+            "查5v5": "查试炼",
+            "myycx": "ycxall",
+            "随机曲": "随机曲目",
+            "随机": "随机曲目",
+        }
+        default_aliases.update(parsed_aliases)
+        self._command_aliases = default_aliases
         self._wake_prefix = config.get("wake_prefix", "")
+        self._filters_initialized = False
 
         # 绑定验证会话 {user_key: {verify_code, server, action, player_id, expire}}
         self._bind_sessions: dict = {}
@@ -378,8 +601,9 @@ class TsuguPlugin(Star):
 
     async def initialize(self) -> None:
         """插件激活时，根据配置动态修改 RegexFilter 的 pattern 以支持别名"""
-        if not self._command_aliases:
+        if self._filters_initialized:
             return
+        self._filters_initialized = True
 
         # 命令名 → handler 方法名映射
         cmd_method_map = {
@@ -406,6 +630,9 @@ class TsuguPlugin(Star):
             if original_cmd not in cmd_method_map:
                 logger.warning(f"命令别名 '{alias_name}' 指向的命令 '{original_cmd}' 不存在，跳过")
                 continue
+            if alias_name in cmd_method_map and alias_name != original_cmd:
+                logger.warning(f"命令别名 '{alias_name}' 与现有命令冲突，跳过")
+                continue
             cmd_new_aliases.setdefault(original_cmd, set()).add(alias_name)
 
         # 遍历 registry，找到对应 handler 的 RegexFilter 并修改 pattern
@@ -426,10 +653,11 @@ class TsuguPlugin(Star):
                 new_aliases = cmd_new_aliases[cmd_name]
                 all_cmds = {cmd_name} | new_aliases
                 suffix = r"(?:\s|$)"
-                if len(all_cmds) == 1:
-                    new_pattern = f"^{list(all_cmds)[0]}{suffix}"
-                else:
-                    new_pattern = f"^(?:{'|'.join(sorted(all_cmds))}){suffix}"
+                escaped_cmds = [
+                    re.escape(name)
+                    for name in sorted(all_cmds, key=lambda name: (-len(name), name))
+                ]
+                new_pattern = f"^(?:{'|'.join(escaped_cmds)}){suffix}"
 
                 event_filter.regex_str = new_pattern
                 if hasattr(event_filter, "regex"):
@@ -474,16 +702,26 @@ class TsuguPlugin(Star):
         return set()
 
     @staticmethod
-    def _parse_aliases(aliases_str: str) -> dict[str, str]:
-        if not aliases_str or aliases_str.strip() == "{}":
+    def _parse_aliases(aliases_value: object) -> dict[str, str]:
+        if isinstance(aliases_value, dict):
+            aliases = aliases_value
+        elif isinstance(aliases_value, str):
+            if not aliases_value.strip() or aliases_value.strip() == "{}":
+                return {}
+            try:
+                aliases = json.loads(aliases_value)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning(f"命令别名配置解析失败: {aliases_value}")
+                return {}
+        else:
             return {}
-        try:
-            aliases = json.loads(aliases_str)
-            if isinstance(aliases, dict):
-                return {str(k): str(v) for k, v in aliases.items()}
-        except (json.JSONDecodeError, ValueError):
-            logger.warning(f"命令别名配置解析失败: {aliases_str}")
-        return {}
+        if not isinstance(aliases, dict):
+            return {}
+        return {
+            str(key).strip(): str(value).strip()
+            for key, value in aliases.items()
+            if str(key).strip() and str(value).strip()
+        }
 
     # ── 通用工具方法 ──────────────────────────────────────────────
 
@@ -527,6 +765,38 @@ class TsuguPlugin(Star):
         parts = msg.split(None, 1)
         return parts[1] if len(parts) > 1 else ""
 
+    def _message_without_wake_prefix(self, event: AstrMessageEvent) -> str:
+        msg = (event.message_str or "").strip()
+        if self._wake_prefix and msg.startswith(self._wake_prefix):
+            return msg[len(self._wake_prefix):].lstrip()
+        return msg
+
+    def _avatar_url(self, event: AstrMessageEvent, platform: str) -> Optional[str]:
+        """尽量复用适配器头像；QQ 适配器缺失时回退到公开头像地址。"""
+        message_obj = getattr(event, "message_obj", None)
+        raw_message = getattr(message_obj, "raw_message", None)
+
+        def find_avatar(value: object, depth: int = 0) -> Optional[str]:
+            if not isinstance(value, dict) or depth > 2:
+                return None
+            for key in ("avatarUrl", "avatar_url", "avatar"):
+                avatar = value.get(key)
+                if isinstance(avatar, str) and avatar.startswith(("http://", "https://")):
+                    return avatar
+            for key in ("sender", "user", "author", "member"):
+                avatar = find_avatar(value.get(key), depth + 1)
+                if avatar:
+                    return avatar
+            return None
+
+        avatar = find_avatar(raw_message)
+        if avatar:
+            return avatar
+        user_id = str(event.get_sender_id() or "")
+        if platform == "red" and user_id.isdigit():
+            return f"https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640"
+        return None
+
     # ── 白名单与 @唤醒 检查 ──────────────────────────────────────
 
     def _is_group_message(self, event: AstrMessageEvent) -> bool:
@@ -562,7 +832,8 @@ class TsuguPlugin(Star):
     def _wrap_chain(self, event: AstrMessageEvent, chain: list) -> list:
         prefix = []
         if self._quote_reply_enabled:
-            msg_id = getattr(event.message_obj, "message_id", None)
+            message_obj = getattr(event, "message_obj", None)
+            msg_id = getattr(message_obj, "message_id", None)
             sender_id = event.get_sender_id()
             if msg_id:
                 prefix.append(Reply(id=msg_id, sender_id=sender_id))
@@ -585,87 +856,97 @@ class TsuguPlugin(Star):
     @filter.regex(r"^绑定\s*(\d{5,15})$")
     async def handle_bind_verify(self, event: AstrMessageEvent):
         """拦截 "绑定 <玩家ID>" 格式的消息，完成绑定验证"""
-        if self._precheck(event):
+        if not self._check_whitelist(event):
             return
 
-        # 定期清理过期会话
+        user_key = self._user_key(event)
+        session = self._bind_sessions.get(user_key)
+        if not session:
+            return
+        if time.time() > session.get("expire", 0):
+            self._bind_sessions.pop(user_key, None)
+            yield self._yield_plain(event, "绑定验证已超时（10分钟），请重新使用 玩家绑定 或 解除绑定 开始新的流程")
+            return
+
+        # 顺手清理其他用户的过期会话
         current_time = time.time()
         expired_keys = [
             k for k, v in self._bind_sessions.items()
-            if current_time > v.get("expire", 0)
+            if k != user_key and current_time > v.get("expire", 0)
         ]
         for k in expired_keys:
             self._bind_sessions.pop(k, None)
         if expired_keys:
             logger.info(f"已清理 {len(expired_keys)} 个过期绑定会话")
 
-        user_key = self._user_key(event)
-        session = self._bind_sessions.get(user_key)
-
-        if not session:
-            return
-        
-        if "expire" in session and time.time() > session["expire"]:
-            self._bind_sessions.pop(user_key, None)
-            yield self._yield_plain(event, "绑定验证已超时（10分钟），请重新使用 玩家绑定 或 解除绑定 开始新的流程")
-            return
-
         msg = event.message_str.strip()
         m = re.match(r"^绑定\s*(\d{5,15})$", msg)
         if not m:
             return
         player_id = int(m.group(1))
+        server = session["server"]
+        action = session["action"]
+        if action == "unbind" and player_id != session.get("player_id"):
+            yield self._yield_plain(
+                event,
+                f"解除绑定时必须发送原玩家ID: {session['player_id']}",
+            )
+            return
 
         platform = self._platform_name(event)
         user_id = event.get_sender_id()
-        server = session["server"]
-        action = session["action"]
 
         try:
-            response = await tsugu_api_async.bind_player_verification(
-                platform, user_id, server, player_id, action
+            _require_success_response(
+                await tsugu_api_async.bind_player_verification(
+                    platform, user_id, server, player_id, action
+                ),
+                "验证失败",
             )
         except FailedException as e:
-            yield self._yield_plain(event, e.response.get("data", "验证失败"))
-            self._bind_sessions.pop(user_key, None)
+            message = _failed_exception_message(e, "验证失败")
+            yield self._yield_plain(event, message)
+            if not ("验证码" in message and "不匹配" in message):
+                self._bind_sessions.pop(user_key, None)
+            return
+        except TsuguResponseError as e:
+            yield self._yield_plain(event, f"验证出错: {e}")
+            if not ("验证码" in str(e) and "不匹配" in str(e)):
+                self._bind_sessions.pop(user_key, None)
             return
         except Exception as e:
-            yield self._yield_plain(event, f"验证出错: {e}")
-            self._bind_sessions.pop(user_key, None)
+            yield self._yield_plain(event, f"验证出错: {e}\n会话已保留，请稍后重试")
             return
 
         self._bind_sessions.pop(user_key, None)
 
-        if response.get("status") == "success":
-            if action == "bind":
-                try:
-                    await tsugu_api_async.change_user_data(platform, user_id, {"mainServer": server})
-                    yield self._yield_plain(event,
-                        f"绑定成功!\n"
-                        f"服务器: {server_id_to_full_name(server)}\n"
-                        f"玩家ID: {player_id}\n"
-                        f"已自动切换到{server_id_to_full_name(server)}模式"
-                    )
-                except Exception:
-                    yield self._yield_plain(event,
-                        f"绑定成功!\n"
-                        f"服务器: {server_id_to_full_name(server)}\n"
-                        f"玩家ID: {player_id}\n"
-                        f"(自动切换主服务器失败，请手动使用 主服务器 {server_id_to_short_name(server)})"
-                    )
-            else:
+        if action == "bind":
+            try:
+                await _change_user_data(platform, user_id, {"mainServer": server})
                 yield self._yield_plain(event,
-                    f"解除绑定成功!\n"
+                    f"绑定成功!\n"
                     f"服务器: {server_id_to_full_name(server)}\n"
-                    f"玩家ID: {player_id}"
+                    f"玩家ID: {player_id}\n"
+                    f"已自动切换到{server_id_to_full_name(server)}模式"
+                )
+            except Exception:
+                yield self._yield_plain(event,
+                    f"绑定成功!\n"
+                    f"服务器: {server_id_to_full_name(server)}\n"
+                    f"玩家ID: {player_id}\n"
+                    f"(自动切换主服务器失败，请手动使用 主服务器 {server_id_to_short_name(server)})"
                 )
         else:
-            yield self._yield_plain(event, f"验证失败: {response.get('data', '未知错误')}\n请重新尝试绑定")
+            yield self._yield_plain(event,
+                f"解除绑定成功!\n"
+                f"服务器: {server_id_to_full_name(server)}\n"
+                f"玩家ID: {player_id}"
+            )
 
     @filter.regex(r"^取消绑定$")
     async def handle_cancel_bind(self, event: AstrMessageEvent):
         """取消正在进行的绑定流程"""
-        if self._precheck(event):
+        if not self._check_whitelist(event):
             return
 
         user_key = self._user_key(event)
@@ -839,26 +1120,19 @@ class TsuguPlugin(Star):
         if self._precheck(event):
             return
         raw = self._cmd_args(event)
-        parts = raw.split() if raw else []
-        invoked_command = event.message_str.strip().split(None, 1)[0]
-        if self._wake_prefix and invoked_command.startswith(self._wake_prefix):
-            invoked_command = invoked_command[len(self._wake_prefix):]
-        times = 1 if invoked_command == "单抽" else 10
-        gacha_id = None
-
-        for part in parts:
-            if part == "十连":
-                times = 10
-            elif part == "单抽":
-                times = 1
-            elif part.isdigit():
-                number = int(part)
-                if number <= 50:
-                    times = number
-                else:
-                    gacha_id = number
-
-        times = max(1, min(times, 100))
+        invoked_command = self._message_without_wake_prefix(event).split(None, 1)[0]
+        try:
+            times, gacha_id = _parse_gacha_arguments(
+                invoked_command,
+                raw,
+                self._max_gacha_draws,
+            )
+        except ValueError as e:
+            yield self._yield_plain(
+                event,
+                f"{e}\n用法: 抽卡模拟 [次数] [卡池ID]\n示例: 抽卡模拟 300 922",
+            )
+            return
 
         try:
             tsugu_user = await _get_tsugu_user(self._platform_name(event), event.get_sender_id())
@@ -887,14 +1161,20 @@ class TsuguPlugin(Star):
         if not parts or not parts[0].isdigit():
             yield self._yield_plain(event, "用法: 查谱面 <曲目ID> [难度]\n示例: 查谱面 1 / 查谱面 1 expert")
             return
+        if len(parts) > 2:
+            yield self._yield_plain(event, "参数过多，用法: 查谱面 <曲目ID> [难度]")
+            return
 
         song_id = int(parts[0])
         difficulty_id = None
         if len(parts) > 1:
-            diff_str = parts[1].lower()
-            difficulty_id = DIFFICULTY_MAP.get(diff_str)
-            if difficulty_id is None:
-                yield self._yield_plain(event, f"未知难度: {parts[1]}\n可选: easy/normal/hard/expert/special (或 ez/nm/hd/ex/sp)")
+            try:
+                difficulty_id = await _resolve_difficulty(parts[1])
+            except ValueError as e:
+                yield self._yield_plain(
+                    event,
+                    f"{e}\n可选: 简单/普通/困难/专家/特殊，或 easy/normal/hard/expert/special",
+                )
                 return
 
         try:
@@ -926,7 +1206,7 @@ class TsuguPlugin(Star):
         server = None
         if raw:
             try:
-                server = server_name_to_id(raw)
+                server = await _resolve_server_name(raw)
             except ValueError as e:
                 yield self._yield_plain(event, str(e))
                 return
@@ -958,15 +1238,14 @@ class TsuguPlugin(Star):
         if self._precheck(event):
             return
         raw = self._cmd_args(event)
-        event_id = None
-        meta = False
-        parts = raw.split() if raw else []
-
-        for part in parts:
-            if part == "-m":
-                meta = True
-            elif part.isdigit():
-                event_id = int(part)
+        try:
+            event_id, meta = _parse_event_stage_arguments(raw)
+        except ValueError as e:
+            yield self._yield_plain(
+                event,
+                f"{e}\n用法: 查试炼 [活动ID] [-m]",
+            )
+            return
 
         try:
             tsugu_user = await _get_tsugu_user(self._platform_name(event), event.get_sender_id())
@@ -1005,18 +1284,11 @@ class TsuguPlugin(Star):
             return
 
         tier = int(parts[0])
-        event_id = None
-        server = None
-
-        for p in parts[1:]:
-            if p.isdigit() and event_id is None:
-                event_id = int(p)
-            else:
-                try:
-                    server = server_name_to_id(p)
-                    break
-                except ValueError:
-                    pass
+        try:
+            event_id, server = await _parse_event_server_arguments(parts[1:])
+        except ValueError as e:
+            yield self._yield_plain(event, str(e))
+            return
 
         try:
             tsugu_user = await _get_tsugu_user(self._platform_name(event), event.get_sender_id())
@@ -1044,17 +1316,11 @@ class TsuguPlugin(Star):
             return
         raw = self._cmd_args(event)
         parts = raw.split() if raw else []
-        event_id = None
-        server = None
-
-        for part in parts:
-            if part.isdigit() and event_id is None:
-                event_id = int(part)
-            else:
-                try:
-                    server = server_name_to_id(part)
-                except ValueError:
-                    pass
+        try:
+            event_id, server = await _parse_event_server_arguments(parts)
+        except ValueError as e:
+            yield self._yield_plain(event, str(e))
+            return
 
         try:
             tsugu_user = await _get_tsugu_user(self._platform_name(event), event.get_sender_id())
@@ -1090,17 +1356,11 @@ class TsuguPlugin(Star):
             return
 
         tier = int(parts[0])
-        event_id = None
-        server = None
-
-        for part in parts[1:]:
-            if part.isdigit() and event_id is None:
-                event_id = int(part)
-            else:
-                try:
-                    server = server_name_to_id(part)
-                except ValueError:
-                    pass
+        try:
+            event_id, server = await _parse_event_server_arguments(parts[1:])
+        except ValueError as e:
+            yield self._yield_plain(event, str(e))
+            return
 
         try:
             tsugu_user = await _get_tsugu_user(self._platform_name(event), event.get_sender_id())
@@ -1135,8 +1395,12 @@ class TsuguPlugin(Star):
         keyword = raw.strip() if raw else None
         
         try:
-            _response = await tsugu_api_async.station_query_all_room()
-            rooms = _response.get("data", [])
+            station_response = await tsugu_api_async.station_query_all_room()
+            rooms = _require_success_response(station_response, "获取车牌失败")
+            if not isinstance(rooms, list):
+                raise TsuguResponseError("获取车牌失败: 响应格式无效")
+            if any(not isinstance(room, dict) for room in rooms):
+                raise TsuguResponseError("获取车牌失败: 房间数据格式无效")
             
             # 关键词过滤 (从原版移植)
             if keyword and rooms:
@@ -1144,7 +1408,16 @@ class TsuguPlugin(Star):
                 if not rooms:
                     yield self._yield_plain(event, f"没有找到包含 {keyword} 的房间")
                     return
-            
+            if not rooms:
+                if os.path.exists(self._no_car_image_path):
+                    yield self._yield_result(
+                        event,
+                        [Image.fromFileSystem(self._no_car_image_path)],
+                    )
+                else:
+                    yield self._yield_plain(event, "当前没有车牌")
+                return
+
             response = await tsugu_api_async.room_list(rooms)
             chain = response_to_chain(response)
             if chain:
@@ -1156,7 +1429,7 @@ class TsuguPlugin(Star):
                 else:
                     yield self._yield_plain(event, "当前没有车牌")
         except FailedException as e:
-            yield self._yield_plain(event, e.response.get("data", "查询失败"))
+            yield self._yield_plain(event, _failed_exception_message(e, "查询失败"))
         except Exception as e:
             yield self._yield_plain(event, f"查询出错: {e}")
 
@@ -1169,7 +1442,7 @@ class TsuguPlugin(Star):
         user_id = event.get_sender_id()
         
         try:
-            await tsugu_api_async.change_user_data(platform, user_id, {"shareRoomNumber": True})
+            await _change_user_data(platform, user_id, {"shareRoomNumber": True})
             yield self._yield_plain(event, "已开启车牌转发\n开启后，您发送的车牌消息会被提交到公共频道")
         except Exception as e:
             yield self._yield_plain(event, f"开启失败: {e}")
@@ -1183,7 +1456,7 @@ class TsuguPlugin(Star):
         user_id = event.get_sender_id()
         
         try:
-            await tsugu_api_async.change_user_data(platform, user_id, {"shareRoomNumber": False})
+            await _change_user_data(platform, user_id, {"shareRoomNumber": False})
             yield self._yield_plain(event, "已关闭车牌转发")
         except Exception as e:
             yield self._yield_plain(event, f"关闭失败: {e}")
@@ -1201,14 +1474,18 @@ class TsuguPlugin(Star):
         if not parts or not parts[0].isdigit():
             yield self._yield_plain(event, "用法: 查玩家 <玩家ID> [服务器名]\n示例: 查玩家 10000000 / 查玩家 40474621 jp")
             return
+        if len(parts) > 2:
+            yield self._yield_plain(event, "参数过多，用法: 查玩家 <玩家ID> [服务器名]")
+            return
 
         player_id = int(parts[0])
         server = None
         if len(parts) > 1:
             try:
-                server = server_name_to_id(parts[1])
-            except ValueError:
-                pass
+                server = await _resolve_server_name(parts[1])
+            except ValueError as e:
+                yield self._yield_plain(event, str(e))
+                return
 
         if server is None:
             try:
@@ -1237,7 +1514,7 @@ class TsuguPlugin(Star):
         server = None
         if raw:
             try:
-                server = server_name_to_id(raw)
+                server = await _resolve_server_name(raw)
             except ValueError as e:
                 yield self._yield_plain(event, str(e))
                 return
@@ -1253,15 +1530,13 @@ class TsuguPlugin(Star):
         user_id = event.get_sender_id()
 
         try:
-            response = await tsugu_api_async.bind_player_request(platform, user_id)
+            verify_code = await _request_bind_code(platform, user_id)
         except FailedException as e:
-            yield self._yield_plain(event, e.response.get("data", "绑定请求失败"))
+            yield self._yield_plain(event, _failed_exception_message(e, "绑定请求失败"))
             return
         except Exception as e:
             yield self._yield_plain(event, f"绑定请求出错: {e}")
             return
-
-        verify_code = str(response["data"]["verifyCode"])
 
         self._bind_sessions[self._user_key(event)] = {
             "verify_code": verify_code,
@@ -1289,7 +1564,7 @@ class TsuguPlugin(Star):
         server = None
         if raw:
             try:
-                server = server_name_to_id(raw)
+                server = await _resolve_server_name(raw)
             except ValueError as e:
                 yield self._yield_plain(event, str(e))
                 return
@@ -1315,15 +1590,13 @@ class TsuguPlugin(Star):
         player_id = player["playerId"]
 
         try:
-            response = await tsugu_api_async.bind_player_request(platform, user_id)
+            verify_code = await _request_bind_code(platform, user_id)
         except FailedException as e:
-            yield self._yield_plain(event, e.response.get("data", "请求失败"))
+            yield self._yield_plain(event, _failed_exception_message(e, "请求失败"))
             return
         except Exception as e:
             yield self._yield_plain(event, f"请求出错: {e}")
             return
-
-        verify_code = str(response["data"]["verifyCode"])
 
         self._bind_sessions[self._user_key(event)] = {
             "verify_code": verify_code,
@@ -1345,59 +1618,73 @@ class TsuguPlugin(Star):
             f"发送「取消绑定」可取消本次操作"
         )
 
+    async def _player_info_result(
+        self,
+        event: AstrMessageEvent,
+        server: Optional[int] = None,
+        index: Optional[int] = None,
+    ):
+        platform = self._platform_name(event)
+        user_id = event.get_sender_id()
+
+        try:
+            tsugu_user = await _get_tsugu_user(platform, user_id)
+        except Exception as e:
+            return self._yield_plain(event, str(e))
+
+        player_list = tsugu_user["userPlayerList"]
+        if not player_list:
+            return self._yield_plain(event, "未绑定任何玩家，请先使用 玩家绑定")
+
+        try:
+            player = _get_user_player(tsugu_user, server, index)
+        except Exception as e:
+            return self._yield_plain(event, str(e))
+
+        try:
+            response = await tsugu_api_async.search_player(player["playerId"], player["server"])
+            chain = response_to_chain(response)
+            if chain:
+                return self._yield_result(event, chain)
+            return self._yield_plain(event, "查询玩家信息失败")
+        except FailedException as e:
+            return self._yield_plain(event, _failed_exception_message(e, "查询失败"))
+        except Exception as e:
+            return self._yield_plain(event, f"查询出错: {e}")
+
     @filter.regex(r"^玩家状态(?:\s*(\d+))?(?:\s|$)")
     async def cmd_player_info(self, event: AstrMessageEvent, player_index: str = ""):
         if self._precheck(event):
             return
 
         raw = self._cmd_args(event).strip()
-        platform = self._platform_name(event)
-        user_id = event.get_sender_id()
-
         server = None
         index = None
-
         if player_index and player_index.isdigit():
             index = int(player_index) - 1
-            raw = ""
-
-        if raw:
+        elif raw:
             if raw.isdigit():
                 index = int(raw) - 1
             else:
                 try:
-                    server = server_name_to_id(raw)
-                except ValueError:
-                    pass
+                    server = await _resolve_server_name(raw)
+                except ValueError as e:
+                    yield self._yield_plain(event, str(e))
+                    return
 
+        yield await self._player_info_result(event, server=server, index=index)
+
+    @filter.regex(r"^.+服玩家状态$")
+    async def shortcut_player_info(self, event: AstrMessageEvent):
+        if self._precheck(event):
+            return
+        server_name = self._message_without_wake_prefix(event).removesuffix("玩家状态")
         try:
-            tsugu_user = await _get_tsugu_user(platform, user_id)
-        except Exception as e:
+            server = await _resolve_server_name(server_name)
+        except ValueError as e:
             yield self._yield_plain(event, str(e))
             return
-
-        player_list = tsugu_user["userPlayerList"]
-        if not player_list:
-            yield self._yield_plain(event, "未绑定任何玩家，请先使用 玩家绑定")
-            return
-
-        try:
-            player = _get_user_player(tsugu_user, server, index)
-        except Exception as e:
-            yield self._yield_plain(event, str(e))
-            return
-
-        try:
-            response = await tsugu_api_async.search_player(player["playerId"], player["server"])
-            chain = response_to_chain(response)
-            if chain:
-                yield self._yield_result(event, chain)
-            else:
-                yield self._yield_plain(event, "查询玩家信息失败")
-        except FailedException as e:
-            yield self._yield_plain(event, e.response.get("data", "查询失败"))
-        except Exception as e:
-            yield self._yield_plain(event, f"查询出错: {e}")
+        yield await self._player_info_result(event, server=server)
 
     @filter.regex(r"^绑定列表\b")
     async def cmd_player_list(self, event: AstrMessageEvent):
@@ -1427,6 +1714,19 @@ class TsuguPlugin(Star):
 
         yield self._yield_plain(event, "\n".join(lines))
 
+    async def _switch_main_server_result(
+        self,
+        event: AstrMessageEvent,
+        server: int,
+    ):
+        platform = self._platform_name(event)
+        user_id = event.get_sender_id()
+        try:
+            await _change_user_data(platform, user_id, {"mainServer": server})
+            return self._yield_plain(event, f"已切换到{server_id_to_full_name(server)}模式")
+        except Exception as e:
+            return self._yield_plain(event, f"切换出错: {e}")
+
     @filter.regex(r"^主服务器\b")
     async def cmd_switch_main_server(self, event: AstrMessageEvent):
         if self._precheck(event):
@@ -1437,19 +1737,23 @@ class TsuguPlugin(Star):
             return
 
         try:
-            server = server_name_to_id(raw)
+            server = await _resolve_server_name(raw)
         except ValueError as e:
             yield self._yield_plain(event, str(e))
             return
+        yield await self._switch_main_server_result(event, server)
 
-        platform = self._platform_name(event)
-        user_id = event.get_sender_id()
-
+    @filter.regex(r"^.+服模式$")
+    async def shortcut_switch_main_server(self, event: AstrMessageEvent):
+        if self._precheck(event):
+            return
+        server_name = self._message_without_wake_prefix(event).removesuffix("模式")
         try:
-            await tsugu_api_async.change_user_data(platform, user_id, {"mainServer": server})
-            yield self._yield_plain(event, f"已切换到{server_id_to_full_name(server)}模式")
-        except Exception as e:
-            yield self._yield_plain(event, f"切换出错: {e}")
+            server = await _resolve_server_name(server_name)
+        except ValueError as e:
+            yield self._yield_plain(event, str(e))
+            return
+        yield await self._switch_main_server_result(event, server)
 
     @filter.regex(r"^显示服务器\b")
     async def cmd_displayed_servers(self, event: AstrMessageEvent):
@@ -1479,12 +1783,14 @@ class TsuguPlugin(Star):
         server_list: list[int] = []
         for part in raw.split():
             try:
-                sid = server_name_to_id(part)
-                if sid not in server_list:
-                    server_list.append(sid)
-            except ValueError:
-                yield self._yield_plain(event, f"无法识别的服务器: {part}\n可选: 日服/国际服/台服/国服/韩服 (或 jp/en/tw/cn/kr)")
+                sid = await _resolve_server_name(part)
+            except ValueError as e:
+                yield self._yield_plain(event, str(e))
                 return
+            if sid in server_list:
+                yield self._yield_plain(event, f"指定了重复的服务器: {part}")
+                return
+            server_list.append(sid)
 
         if not server_list:
             yield self._yield_plain(event, "请至少指定一个服务器")
@@ -1494,7 +1800,7 @@ class TsuguPlugin(Star):
         user_id = event.get_sender_id()
 
         try:
-            await tsugu_api_async.change_user_data(platform, user_id, {"displayedServerList": server_list})
+            await _change_user_data(platform, user_id, {"displayedServerList": server_list})
             names = ", ".join(server_id_to_full_name(s) for s in server_list)
             yield self._yield_plain(event, f"显示服务器已更新为: {names}")
         except Exception as e:
@@ -1530,7 +1836,7 @@ class TsuguPlugin(Star):
             return
 
         try:
-            await tsugu_api_async.change_user_data(platform, user_id, {"userPlayerIndex": index})
+            await _change_user_data(platform, user_id, {"userPlayerIndex": index})
             player = player_list[index]
             yield self._yield_plain(event,
                 f"已切换默认绑定:\n"
@@ -1609,7 +1915,8 @@ class TsuguPlugin(Star):
                 platform,
                 user_id,
                 sender_name,
-                self._bandori_station_token,
+                avatar_url=self._avatar_url(event, platform),
+                bandori_station_token=self._bandori_station_token,
             )
             if response.get("status") == "success":
                 logger.info(f"车牌 {room_number} 已静默提交到公共频道")
@@ -1621,7 +1928,7 @@ class TsuguPlugin(Star):
         except FailedException as e:
             logger.warning(
                 f"车牌 {room_number} 提交失败: "
-                f"{e.response.get('data', '未知错误')}"
+                f"{_failed_exception_message(e, '未知错误')}"
             )
         except Exception as e:
             logger.warning(f"车牌 {room_number} 提交出错: {e}")

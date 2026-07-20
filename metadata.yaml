@@ -1,8 +1,8 @@
 name: astrbot_plugin_tsugu
 display_name: Tsugu Bang Dream! 游戏助手
-desc: BanG Dream! 游戏助手插件，支持查曲/查卡/查角色/查活动/查卡池/抽卡模拟/谱面查询/分数表/活动试炼/档线查询/车牌列表/车牌转发/玩家绑定等 26 个命令。v2.0.1 修复被动监听和车牌时间戳，兼容 NapCat/LLOneBot
-short_desc: BanG Dream! 少女乐团派对全能助手，26 个命令覆盖曲目/卡牌/活动/车牌/玩家
-version: 2.0.1
+desc: BanG Dream! 游戏助手插件，完整对齐原版当前启用的查询、抽卡、档线、车牌和玩家管理能力。v2.1.0 修复参数解析、绑定会话、模糊搜索、空车列表及车牌头像等兼容问题
+short_desc: BanG Dream! 少女乐团派对全能助手，27 个命令覆盖曲目/卡牌/活动/车牌/玩家
+version: 2.1.0
 author: QClaw
 repo: https://github.com/buruqu/astrbot_plugin_tsugu
 astrbot_version: ">=4.16.0"
